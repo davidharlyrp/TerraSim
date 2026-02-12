@@ -1,15 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Line, Text } from '@react-three/drei';
+import { useTheme } from '../context/ThemeContext';
 import * as THREE from 'three';
 
-interface RulerProps {
-    generalSettings: any;
-}
-
-export const Ruler: React.FC<RulerProps> = ({ generalSettings }) => {
+export const Ruler: React.FC = () => {
     const { camera, size } = useThree();
-
+    const { theme } = useTheme();
     const [view, setView] = useState({
         left: 0, right: 0, top: 0, bottom: 0, zoom: 20,
         camX: 0, camY: 0
@@ -74,7 +71,7 @@ export const Ruler: React.FC<RulerProps> = ({ generalSettings }) => {
     const horizontalRulerY = view.top - axisOffset;
     const verticalRulerX = view.right - axisOffset;
 
-    const rulerColor = generalSettings.dark_background_color ? "#ffffff" : "#28292a";
+    const rulerColor = theme === 'dark' ? "#ffffff" : "#28292a";
 
     return (
         <group>

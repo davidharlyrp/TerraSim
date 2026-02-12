@@ -1,9 +1,10 @@
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
-import { WizardTab } from './WizardHeader';
+import { WizardTab } from './WizardNavigation';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrthographicCamera, OrbitControls, Grid, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { Ruler } from './Ruler';
+import { useTheme } from '../context/ThemeContext';
 import { Trash } from 'lucide-react';
 import { PolygonData, PointLoad, Material, GeneralSettings, LineLoad, PhaseType } from '../types';
 
@@ -51,11 +52,13 @@ const Polygon = ({ data, materials, isSelected, isActive, onSelect, onContextMen
     const effectiveMaterialId = overrideMaterialId || data.materialId;
     const material = materials.find(m => m.id === effectiveMaterialId);
     let fillColor = material ? material.color : '#334155';
-    let lineColor = "white";
+    let lineColor = useTheme().theme === 'dark' ? 'white' : '#64748b';
+    let pointColor = useTheme().theme === 'dark' ? 'white' : '#64748b';
 
     if (!isActive) {
         fillColor = "#334155"; // Neutral gray for inactive
-        lineColor = "#64748b";
+        lineColor = useTheme().theme === 'dark' ? 'white' : '#64748b';
+        pointColor = useTheme().theme === 'dark' ? 'white' : '#64748b';
     }
 
     const { shape, points } = useMemo(() => {
@@ -65,7 +68,7 @@ const Polygon = ({ data, materials, isSelected, isActive, onSelect, onContextMen
         data.vertices.forEach((v, i) => {
             if (i === 0) shape.moveTo(v.x, v.y);
             else shape.lineTo(v.x, v.y);
-            pts.push(new THREE.Vector3(v.x, v.y, 0.05));
+            pts.push(new THREE.Vector3(v.x, v.y, 2.5));
         });
 
         shape.closePath();
@@ -83,7 +86,7 @@ const Polygon = ({ data, materials, isSelected, isActive, onSelect, onContextMen
                 <shapeGeometry args={[shape]} />
                 <meshBasicMaterial
                     color={fillColor}
-                    opacity={isSelected ? 1 : (isActive ? 1 : 0.2)}
+                    opacity={isSelected ? 1 : (isActive ? 0.8 : 0.2)}
                     transparent
                     side={THREE.DoubleSide}
                 />
@@ -94,7 +97,7 @@ const Polygon = ({ data, materials, isSelected, isActive, onSelect, onContextMen
             {points.map((p, i) => (
                 <mesh key={i} position={p}>
                     <circleGeometry args={[0.05, 16]} />
-                    <meshBasicMaterial color={isActive ? "white" : "#475569"} />
+                    <meshBasicMaterial color={pointColor} />
                 </mesh>
             ))}
         </group>
@@ -184,6 +187,40 @@ const LineLoadMarker = ({ load, isSelected, isActive, onSelect, onContextMenu }:
             ))}
         </group>
     );
+};
+
+
+// --- CURSOR TRACKER ---
+const CursorTracker = ({ onMouseMove, generalSettings }: { onMouseMove: (x: number, y: number) => void, generalSettings: GeneralSettings }) => {
+    const { camera, mouse, raycaster } = useThree();
+
+    const getWorldPos = useCallback(() => {
+        raycaster.setFromCamera(mouse, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+        const target = new THREE.Vector3();
+        raycaster.ray.intersectPlane(plane, target);
+
+        if (generalSettings.snapToGrid) {
+            const s = generalSettings.snapSpacing;
+            return {
+                x: Math.round(target.x / s) * s,
+                y: Math.round(target.y / s) * s
+            };
+        }
+        return { x: target.x, y: target.y };
+    }, [camera, mouse, raycaster, generalSettings]);
+
+    useEffect(() => {
+        const handleMove = () => {
+            const pos = getWorldPos();
+            onMouseMove(pos.x, pos.y);
+        };
+
+        window.addEventListener('mousemove', handleMove);
+        return () => window.removeEventListener('mousemove', handleMove);
+    }, [getWorldPos, onMouseMove]);
+
+    return null;
 };
 
 
@@ -355,6 +392,7 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, target: { type: 'polygon' | 'load', id: string | number } } | null>(null);
+    const [cursorPos, setCursorPos] = useState<{ x: number, y: number } | null>(null);
 
     // Handling Delete Key for canvas-based deletion
     useEffect(() => {
@@ -397,8 +435,10 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
         });
     };
 
-    const backgroundColor = generalSettings.dark_background_color ? "bg-slate-900" : "bg-gray-100";
-    const gridColor = generalSettings.dark_background_color ? "#535c66" : "#595959";
+    const { theme } = useTheme();
+    const backgroundColor = theme === 'dark' ? "bg-slate-950" : "bg-slate-50";
+    const gridColor = theme === 'dark' ? "#535c66" : "#e2e8f0";
+    const gridSpacing = generalSettings.snapSpacing || 1;
 
     return (
         <div ref={containerRef} className={`w-full h-full ${backgroundColor} overflow-hidden outline-none relative`}>
@@ -406,46 +446,36 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                 <OrthographicCamera makeDefault position={[0, 0, 90]} zoom={20} />
                 <OrbitControls enableRotate={false} />
                 <ambientLight intensity={1.0} />
-                <Grid position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]} args={[500, 500]} sectionColor={gridColor} fadeDistance={100} />
-                <Ruler generalSettings={generalSettings} />
+                <Grid position={[0, 0, -1]} rotation={[Math.PI / 2, 0, 0]} args={[500, 500]} cellColor={gridColor} sectionColor={gridColor} cellSize={gridSpacing} sectionSize={1} fadeDistance={100} />
+                <Ruler />
 
                 {water_levels && water_levels.map((wl, i) => {
-                    // Determine visual state
-                    // In INPUT tab, show all, maybe selected one brighter? 
-                    // In STAGING tab, highlight activeWaterLevelId, dim others.
 
-                    const isSelected = selectedEntity?.type === 'water_level' && selectedEntity.id === i; // Selection in sidebar passes 'i' usually? Wait, sidebar passes 'i' for selection id in my InputSidebar code.
-                    // Actually, InputSidebar passes `i` as ID for selection. Let's consistency check.
-                    // In InputSidebar: onSelectEntity({ type: 'water_level', id: i })
-                    // Ideally we should use wl.id but Sidebar uses index. Let's stick to index for selection if sidebar does, OR fix sidebar.
-                    // Sidebar uses index. So selectedEntity.id === i is correct for syncing with sidebar.
+                    const isSelected = selectedEntity?.type === 'water_level' && selectedEntity.id === i;
 
                     const isActivePhase = activeTab === WizardTab.STAGING ? (wl.id === activeWaterLevelId) : true;
 
-                    // Colors
-                    // Active Phase: Cyan/Blue
-                    // Inactive Phase: Faint Slate
-
                     let lineColor = isActivePhase ? "cyan" : "#334155";
-                    if (isSelected) lineColor = "#3b82f6"; // Selected overrides
+                    let pointColor = isActivePhase ? "cyan" : "#334155";
+                    if (isSelected) lineColor = "#3b82f6";
+                    if (isSelected) pointColor = "#3b82f6";
 
                     return (
                         <group key={wl.id} onClick={(e) => { e.stopPropagation(); }}>
                             <Line
-                                points={wl.points.map(p => new THREE.Vector3(p.x, p.y, 0.4))}
+                                points={wl.points.map(p => new THREE.Vector3(p.x, p.y, 5))}
                                 color={lineColor}
                                 lineWidth={isSelected || isActivePhase ? 3 : 1}
                                 dashed={!isActivePhase}
                             />
-                            {/* Only show points if selected or active? Or always? Maybe always but small? */}
                             {isActivePhase && wl.points.map((p, ptIdx) => (
                                 <mesh
                                     key={ptIdx}
-                                    position={[p.x, p.y, 0.45]}
+                                    position={[p.x, p.y, 5]}
                                     onClick={(e) => { e.stopPropagation(); onSelectEntity({ type: 'water_level', id: i }); }}
                                 >
                                     <circleGeometry args={[isSelected ? 0.3 : 0.05, 16]} />
-                                    <meshBasicMaterial color={isSelected ? "#3b82f6" : lineColor} />
+                                    <meshBasicMaterial color={pointColor} />
                                 </mesh>
                             ))}
                         </group>
@@ -509,18 +539,40 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                     onCancel={onCancelDraw}
                     generalSettings={generalSettings}
                 />
+
+                <CursorTracker
+                    onMouseMove={(x, y) => setCursorPos({ x, y })}
+                    generalSettings={generalSettings}
+                />
             </Canvas>
+
+            {/* Cursor Coordinate Overlay */}
+            {cursorPos && (
+                <div className="absolute bottom-4 left-4 z-[50] pointer-events-none">
+                    <div className="px-3 py-1.5 rounded-lg bg-slate-100/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200 dark:border-slate-700 shadow-lg flex items-center gap-3">
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">X</span>
+                            <span className="text-xs font-mono font-medium text-slate-700 dark:text-slate-200">{cursorPos.x.toFixed(2)}</span>
+                        </div>
+                        <div className="w-[1px] h-3 bg-slate-200 dark:bg-slate-700" />
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Y</span>
+                            <span className="text-xs font-mono font-medium text-slate-700 dark:text-slate-200">{cursorPos.y.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {contextMenu && (
                 <div
-                    className="absolute bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[150px]"
+                    className="absolute bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[150px]"
                     style={{ left: contextMenu.x, top: contextMenu.y }}
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* Toggle Active (only in staging/if prop exists) */}
                     {onToggleActive && currentPhaseType !== PhaseType.SAFETY_ANALYSIS && (
                         <button
-                            className="cursor-pointer w-full text-left px-4 py-2 text-[10px] font-bold text-slate-100 hover:bg-slate-700 transition border-b border-slate-700/50"
+                            className="cursor-pointer w-full text-left px-4 py-2 text-[10px] font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 transition border-b border-slate-200 dark:border-slate-700/50"
                             onClick={() => {
                                 onToggleActive(contextMenu.target.type, contextMenu.target.id);
                                 setContextMenu(null);
@@ -539,15 +591,15 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                         /* Hide if in STAGING but Safety Analysis (locked) */
                         !(activeTab === WizardTab.STAGING && currentPhaseType === PhaseType.SAFETY_ANALYSIS) && (
                             <div className="group/sub relative">
-                                <div className="flex items-center justify-between px-4 py-2 text-[10px] font-bold text-slate-100 hover:bg-slate-700 transition cursor-default">
+                                <div className="flex items-center justify-between px-4 py-2 text-[10px] font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-default">
                                     <span>{activeTab === WizardTab.STAGING ? "Override Material" : "Assign Material"}</span>
                                     <span className="opacity-50">›</span>
                                 </div>
-                                <div className="hidden group-hover/sub:block absolute left-full top-0 ml-[-1px] bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[120px] max-h-[200px] overflow-y-auto custom-scrollbar">
+                                <div className="hidden group-hover/sub:block absolute left-full top-0 ml-[-1px] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 min-w-[120px] max-h-[200px] overflow-y-auto custom-scrollbar">
                                     {materials.map(mat => (
                                         <button
                                             key={mat.id}
-                                            className="cursor-pointer w-full text-left px-4 py-2 text-[10px] text-slate-100 hover:bg-slate-700 transition flex items-center gap-2"
+                                            className="cursor-pointer w-full text-left px-4 py-2 text-[10px] text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center gap-2"
                                             onClick={() => {
                                                 if (activeTab === WizardTab.STAGING && onOverrideMaterial) {
                                                     onOverrideMaterial(contextMenu.target.id as number, mat.id);

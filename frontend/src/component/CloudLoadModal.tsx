@@ -99,12 +99,12 @@ export const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ onLoad, onClose 
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50">
-                    <div className="flex items-center gap-2 text-white font-bold">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden transition-colors">
+                <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 transition-colors">
+                    <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
                         <h3>Your Cloud Projects</h3>
                     </div>
-                    <button onClick={onClose} className="cursor-pointer text-slate-400 hover:text-white transition-colors">
+                    <button onClick={onClose} className="cursor-pointer text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -125,7 +125,7 @@ export const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ onLoad, onClose 
                             <div
                                 key={project.id}
                                 onClick={() => handleLoad(project)}
-                                className="group flex items-center justify-between p-4 rounded-xl border border-slate-800 bg-slate-800/20 hover:bg-slate-800/50 hover:border-slate-700 transition-all cursor-pointer"
+                                className="group flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/20 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-700 transition-all cursor-pointer"
                             >
                                 <div className="flex flex-col gap-1 flex-1">
                                     <div className="flex items-center gap-2">
@@ -135,15 +135,15 @@ export const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ onLoad, onClose 
                                                     type="text"
                                                     value={editName}
                                                     onChange={e => setEditName(e.target.value)}
-                                                    className="bg-slate-950 border border-slate-600 rounded px-2 py-0.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+                                                    className="bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-600 rounded px-2 py-0.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none"
                                                     autoFocus
                                                 />
-                                                <button onClick={(e) => saveEdit(project.id, e)} className="cursor-pointer p-1 hover:text-green-400 text-slate-400">
+                                                <button onClick={(e) => saveEdit(project.id, e)} className="cursor-pointer p-1 hover:text-green-600 dark:hover:text-green-400 text-slate-400">
                                                     <Check className="w-4 h-4" />
                                                 </button>
                                             </div>
                                         ) : (
-                                            <h4 className="font-semibold text-slate-200 group-hover:text-blue-400 transition-colors">{project.name}</h4>
+                                            <h4 className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{project.name}</h4>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-2 text-[10px] text-slate-500">
@@ -156,7 +156,7 @@ export const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ onLoad, onClose 
                                     {editingId !== project.id && (
                                         <button
                                             onClick={(e) => startEdit(project, e)}
-                                            className="cursor-pointer p-2 rounded-lg hover:bg-blue-500/10 text-slate-500 hover:text-blue-400 transition-colors"
+                                            className="cursor-pointer p-2 rounded-lg hover:bg-blue-500/10 text-slate-400 hover:text-blue-600 dark:text-slate-500 dark:hover:text-blue-400 transition-colors"
                                             title="Rename"
                                         >
                                             <Edit2 className="w-4 h-4" />
@@ -164,14 +164,14 @@ export const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ onLoad, onClose 
                                     )}
                                     <button
                                         onClick={(e) => handleDownload(project, e)}
-                                        className="cursor-pointer p-2 rounded-lg hover:bg-blue-500/10 text-slate-500 hover:text-blue-400 transition-colors"
+                                        className="cursor-pointer p-2 rounded-lg hover:bg-blue-500/10 text-slate-400 hover:text-blue-600 dark:text-slate-500 dark:hover:text-blue-400 transition-colors"
                                         title="Download .tsm"
                                     >
                                         <Download className="w-4 h-4" />
                                     </button>
                                     <button
                                         onClick={(e) => handleDelete(project.id, e)}
-                                        className="cursor-pointer p-2 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition-colors"
+                                        className="cursor-pointer p-2 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 transition-colors"
                                         title="Delete"
                                     >
                                         <Trash2 className="w-4 h-4" />

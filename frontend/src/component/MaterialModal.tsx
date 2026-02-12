@@ -12,16 +12,16 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
     const [edited, setEdited] = useState<Material>({ ...material });
 
     return (
-        <div className="fixed inset-0 w-screen h-screen bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
-            <div className="bg-slate-900 p-8 rounded-xl w-full max-w-[800px] max-h-[70vh] overflow-y-auto custom-scrollbar border border-slate-700 shadow-2xl text-white">
-                <h3 className="text-lg font-bold text-slate-100 border-b border-slate-800 pb-2">Edit Material: <span className="text-blue-400">{edited.name}</span></h3>
+        <div className="fixed inset-0 w-screen h-screen bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-xl w-full max-w-[800px] max-h-[70vh] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 shadow-2xl text-slate-900 dark:text-white transition-colors">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-2">Edit Material: <span className="text-gray-600 dark:text-gray-400">{edited.name}</span></h3>
 
                 <div className="grid md:grid-cols-2 grid-cols-1 gap-6">
-                    <div className='border-r border-slate-800 pr-2'>
-                        <div className='titlelabel mt-2 border-b border-slate-800 pb-1'>
+                    <div className='border-r border-slate-200 dark:border-slate-800 pr-2'>
+                        <div className='titlelabel mt-2 border-b border-slate-200 dark:border-slate-800 pb-1'>
                             General Information
                         </div>
-                        <div className="flex flex-col gap-1 border-b border-slate-800 py-4">
+                        <div className="flex flex-col gap-1 border-b border-slate-200 dark:border-slate-800 py-4">
                             <div className="grid grid-cols-2 items-center gap-1">
                                 <span className="itemlabel">Name</span>
                                 <input
@@ -46,7 +46,7 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-1 border-b border-slate-800 py-4">
+                        <div className="flex flex-col gap-1 border-b border-slate-200 dark:border-slate-800 py-4">
                             <div className="grid grid-cols-2 items-center gap-1">
                                 <span className="itemlabel">Material Model</span>
                                 <select
@@ -88,10 +88,10 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                     </div>
 
                     <div>
-                        <div className='titlelabel mt-2 border-b border-slate-800 pb-1'>
+                        <div className='titlelabel mt-2 border-b border-slate-200 dark:border-slate-800 pb-1'>
                             Soil Properties
                         </div>
-                        <div className="flex flex-col gap-1 border-b border-slate-800 py-4">
+                        <div className="flex flex-col gap-1 border-b border-slate-200 dark:border-slate-800 py-4">
                             <div className="grid grid-cols-4 items-center gap-1">
                                 {(edited.material_model === MaterialModel.LINEAR_ELASTIC || edited.drainage_type === DrainageType.UNDRAINED_C) ? (
                                     <>
@@ -211,7 +211,7 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
 
                                     <span className="itemlabel col-span-2">
                                         <MathRender tex="K_{0x}" />
-                                        <div className="text-[10px] text-slate-400">(Auto via Poisson's Ratio if empty)</div>
+                                        <div className="text-[10px] text-slate-500 dark:text-slate-400">(Auto via Poisson's Ratio if empty)</div>
                                     </span>
                                     <input
                                         type="number"
@@ -226,8 +226,8 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                     </div>
                 </div>
 
-                <div className="flex justify-end gap-3 mt-10 p-4 -m-8 bg-slate-800/50 rounded-b-xl border-t border-slate-800">
-                    <button onClick={onClose} className="cursor-pointer px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors">Cancel</button>
+                <div className="flex justify-end gap-3 mt-10 p-4 -m-8 bg-slate-100 dark:bg-slate-800/50 rounded-b-xl border-t border-slate-200 dark:border-slate-800 transition-colors">
+                    <button onClick={onClose} className="cursor-pointer px-4 py-2 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors">Cancel</button>
                     <button onClick={() => onSave(edited)} className="cursor-pointer px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded shadow-lg shadow-blue-500/20 transition-all">Save Changes</button>
                 </div>
             </div>

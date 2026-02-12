@@ -1,39 +1,46 @@
 import React from 'react';
 import { SolverResponse, PhaseRequest, StepPoint, PhaseType } from '../types';
+import { useTheme } from '../context/ThemeContext';
 import { ChevronDown, CircleCheck, CircleMinus } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: StepPoint[], isLive?: boolean, isSafety?: boolean }) => {
     if (!points || points.length < 2) return null;
 
+    const { theme } = useTheme();
     const [isExpanded, setIsExpanded] = React.useState(false);
+    const axisColor = theme === 'light' ? '#475569' : '#ffffff';
+    const gridColor = theme === 'light' ? '#e2e8f0' : '#334155';
+    const tooltipBg = theme === 'light' ? '#ffffff' : '#1e293b';
+    const tooltipBorder = theme === 'light' ? '#e2e8f0' : '#334155';
+    const tooltipText = theme === 'light' ? '#0f172a' : '#f8fafc';
 
     const chart = (
         <>
             <div className="h-40 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={points} margin={{ top: 5, right: 10, bottom: 2, left: -20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" />
+                        <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                         <XAxis
                             dataKey="max_disp"
                             type="number"
                             domain={['auto', 'auto']}
                             fontSize={8}
-                            stroke="#ffffff"
+                            stroke={axisColor}
                             tickFormatter={(v) => typeof v === 'number' ? v.toPrecision(2) : v}
-                            label={{ value: 'Disp (m)', position: 'insideBottom', offset: 5, fontSize: 8, fill: '#ffffff' }}
+                            label={{ value: 'Disp (m)', position: 'insideBottom', offset: 5, fontSize: 8, fill: axisColor }}
                         />
                         <YAxis
                             dataKey="m_stage"
                             domain={[0, 'auto']}
                             fontSize={8}
-                            stroke="#ffffff"
-                            label={{ value: isSafety ? 'Σ Msf' : 'Mstage', angle: -90, position: 'insideLeft', offset: 25, fontSize: 8, fill: '#ffffff' }}
+                            stroke={axisColor}
+                            label={{ value: isSafety ? 'Σ Msf' : 'Mstage', angle: -90, position: 'insideLeft', offset: 25, fontSize: 8, fill: axisColor }}
                         />
                         <Tooltip
-                            contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '9px' }}
+                            contentStyle={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: '8px', fontSize: '9px', color: tooltipText }}
                             itemStyle={{ color: isLive ? '#60a5fa' : '#4ade80' }}
-                            labelStyle={{ color: '#94a3b8' }}
+                            labelStyle={{ color: axisColor }}
                             formatter={(value: any) => [typeof value === 'number' ? value.toPrecision(4) : value, 'Value']}
                             labelFormatter={(value: any) => `Disp: ${typeof value === 'number' ? value.toPrecision(4) : value} m`}
                         />
@@ -43,7 +50,7 @@ const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: Step
                             stroke={isLive ? "#3b82f6" : "#22c55e"}
                             strokeWidth={2}
                             dot={{ r: 2, fill: isLive ? "#3b82f6" : "#22c55e", strokeWidth: 0 }}
-                            activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1 }}
+                            activeDot={{ r: 4, stroke: axisColor, strokeWidth: 1 }}
                             isAnimationActive={false}
                         />
                     </LineChart>
@@ -53,7 +60,7 @@ const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: Step
     )
 
     return (
-        <div className="mt-2 bg-slate-800/50 rounded-lg border border-slate-700 animate-in fade-in zoom-in-95 duration-300">
+        <div className="mt-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in-95 duration-300">
 
             {isLive ? (
                 <>
@@ -67,36 +74,35 @@ const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: Step
                 <>
                     <div className="w-full relative text-xs font-semibold py-2 tracking-widest text-center">
                         {isSafety ? 'Msf' : 'Mstage'} vs. Disp.
-                        <button onClick={() => setIsExpanded(!isExpanded)} className="cursor-pointer absolute right-2 text-slate-500 hover:text-white transition-colors">
+                        <button onClick={() => setIsExpanded(!isExpanded)} className="cursor-pointer absolute right-2 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">
                             <ChevronDown size={12} className={`transition ${isExpanded ? 'rotate-180' : ''}`} />
                         </button>
                     </div>
                     {isExpanded && (
-
                         <div className="h-40 w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={points} margin={{ top: 5, right: 10, bottom: 2, left: -20 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" />
+                                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                                     <XAxis
                                         dataKey="max_disp"
                                         type="number"
                                         domain={['auto', 'auto']}
                                         fontSize={8}
-                                        stroke="#ffffff"
+                                        stroke={axisColor}
                                         tickFormatter={(v) => typeof v === 'number' ? v.toPrecision(2) : v}
-                                        label={{ value: 'Disp (m)', position: 'insideBottom', offset: 5, fontSize: 8, fill: '#ffffff' }}
+                                        label={{ value: 'Disp (m)', position: 'insideBottom', offset: 5, fontSize: 8, fill: axisColor }}
                                     />
                                     <YAxis
                                         dataKey="m_stage"
                                         domain={[0, 'auto']}
                                         fontSize={8}
-                                        stroke="#ffffff"
-                                        label={{ value: isSafety ? 'Σ Msf' : 'Mstage', angle: -90, position: 'insideLeft', offset: 25, fontSize: 8, fill: '#ffffff' }}
+                                        stroke={axisColor}
+                                        label={{ value: isSafety ? 'Σ Msf' : 'Mstage', angle: -90, position: 'insideLeft', offset: 25, fontSize: 8, fill: axisColor }}
                                     />
                                     <Tooltip
-                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '9px' }}
+                                        contentStyle={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: '8px', fontSize: '9px', color: tooltipText }}
                                         itemStyle={{ color: isLive ? '#60a5fa' : '#4ade80' }}
-                                        labelStyle={{ color: '#94a3b8' }}
+                                        labelStyle={{ color: axisColor }}
                                         formatter={(value: any) => [typeof value === 'number' ? value.toPrecision(4) : value, 'Value']}
                                         labelFormatter={(value: any) => `Disp: ${typeof value === 'number' ? value.toPrecision(4) : value} m`}
                                     />
@@ -106,7 +112,7 @@ const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: Step
                                         stroke={isLive ? "#3b82f6" : "#22c55e"}
                                         strokeWidth={2}
                                         dot={{ r: 2, fill: isLive ? "#3b82f6" : "#22c55e", strokeWidth: 0 }}
-                                        activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1 }}
+                                        activeDot={{ r: 4, stroke: axisColor, strokeWidth: 1 }}
                                         isAnimationActive={false}
                                     />
                                 </LineChart>
@@ -150,13 +156,13 @@ const ResultSummary = ({ phaseResult }: { phaseResult: any }) => {
     }, [phaseResult]);
 
     const CompactRow = ({ label, values, unit = "kN/m²" }: { label: string, values: { min: number, max: number }, unit?: string }) => (
-        <div className="group flex justify-between items-center py-1.5 border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors px-1 rounded">
-            <span className="text-[10px] text-slate-400 font-medium">{label}</span>
+        <div className="group flex justify-between items-center py-1.5 border-b border-slate-200 dark:border-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors px-1 rounded">
+            <span className="text-[10px] text-slate-600 dark:text-slate-400 font-medium">{label}</span>
             <div className="flex items-center gap-2 text-[10px] font-mono">
-                <span className="text-rose-400/80">{values.min.toPrecision(3)}</span>
-                <span className="text-slate-600">/</span>
-                <span className="text-emerald-400/80">{values.max.toPrecision(3)}</span>
-                <span className="text-[9px] text-slate-500 ml-1 w-8 text-right underline decoration-slate-700">{unit}</span>
+                <span className="text-rose-500 dark:text-rose-400/80">{values.min.toPrecision(3)}</span>
+                <span className="text-slate-400 dark:text-slate-600">/</span>
+                <span className="text-emerald-600 dark:text-emerald-400/80">{values.max.toPrecision(3)}</span>
+                <span className="text-[9px] text-slate-500 ml-1 w-8 text-right underline decoration-slate-300 dark:decoration-slate-700">{unit}</span>
             </div>
         </div>
     );
@@ -204,13 +210,13 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
     solverResult, isRunning, onRun, onCancel, phases, currentPhaseIdx, onSelectPhase, liveStepPoints = []
 }) => {
     return (
-        <div className="absolute md:top-4 md:right-4 md:bottom-25 right-0 top-0 bottom-0 md:w-72 w-[calc(100%-40px)] bg-slate-900/95 backdrop-blur-md md:border border-l border-slate-700 md:rounded-2xl shadow-2xl flex flex-col md:z-20 z-50">
-            <div className={"p-5 border-b border-slate-800 bg-slate-800/20 " + (isRunning ? "grid grid-cols-2 gap-2 items-center" : "")}>
+        <div className="absolute md:top-4 md:right-4 md:bottom-25 right-0 top-0 bottom-0 md:w-72 w-[calc(100%-40px)] bg-white/95 dark:bg-slate-900/95 backdrop-blur-md md:border border-l border-slate-200 dark:border-slate-700 md:rounded-2xl shadow-2xl flex flex-col md:z-20 z-50">
+            <div className={"p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 " + (isRunning ? "grid grid-cols-2 gap-2 items-center" : "")}>
                 <button
                     onClick={onRun}
                     disabled={isRunning}
                     className={`cursor-pointer w-full py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all md:shadow-lg ${isRunning
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20 hover:scale-[1.02]'
                         }`}
                 >
@@ -266,8 +272,8 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                                             key={idx}
                                             onClick={() => onSelectPhase(idx)}
                                             className={`cursor-pointer px-3 py-2 text-left text-xs rounded-lg border transition-all truncate flex items-center justify-between gap-2 ${currentPhaseIdx === idx
-                                                ? (isFailed ? 'bg-rose-600/10 border-rose-500/50 text-rose-400 font-bold' : 'bg-blue-600/10 border-blue-500/50 text-blue-400 font-bold')
-                                                : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:bg-slate-800/60'
+                                                ? (isFailed ? 'bg-rose-600/10 border-rose-500/50 text-rose-600 dark:text-rose-400 font-bold' : 'bg-blue-600/10 border-blue-500/50 text-blue-600 dark:text-blue-400 font-bold')
+                                                : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/50 text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
                                                 }`}
                                         >
                                             <span className="truncate">{idx}. {p.name}</span>
@@ -284,7 +290,7 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                             </div>
                         </div>
 
-                        <div className="border-t border-slate-800 pb-30">
+                        <div className="border-t border-slate-200 dark:border-slate-800 pb-30">
                             <ResultSummary phaseResult={solverResult.phases[currentPhaseIdx]} />
                         </div>
                     </>

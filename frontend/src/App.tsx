@@ -7,7 +7,10 @@ import { UserManual } from './docs/UserManual';
 import { ScientificReference } from './docs/ScientificReference';
 import { InputCanvas } from './component/InputCanvas';
 import { OutputCanvas } from './component/OutputCanvas';
-import { WizardHeader, WizardTab } from './component/WizardHeader';
+import { AppHeader } from './component/AppHeader';
+import { WizardNavigation, WizardTab } from './component/WizardNavigation';
+import { InputToolbar } from './component/InputToolbar';
+
 import { InputSidebar } from './component/InputSidebar';
 import { MeshSidebar } from './component/MeshSidebar';
 import { StagingSidebar } from './component/StagingSidebar';
@@ -30,7 +33,6 @@ function MainApp() {
     const { isValid, incrementRunningCount, user } = useAuth();
     // 0. Project State
     const [projectName, setProjectName] = useState("New Project");
-    const [projectMetadata, setProjectMetadata] = useState<ProjectMetadata | null>(null);
     const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
     const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
     const [isCloudSaving, setIsCloudSaving] = useState(false);
@@ -274,7 +276,6 @@ function MainApp() {
         if (selectedEntity?.type === 'load' && selectedEntity.id === id) setSelectedEntity(null);
     };
 
-
     const handleDeleteWaterPoint = (wlIndex: number, ptIndex: number) => {
         console.log(`Deleting water point ${ptIndex} from level ${wlIndex}`);
         const next = [...waterLevels];
@@ -301,14 +302,12 @@ function MainApp() {
         setWaterLevels(next);
     };
 
-
     const handleSaveProject = () => {
         const metadata: ProjectMetadata = {
             lastEdited: new Date().toISOString(),
             authorName: user?.name,
             authorEmail: user?.email,
         };
-        setProjectMetadata(metadata);
 
         const projectData: ProjectFile = {
             version: APP_VERSION,
@@ -355,7 +354,6 @@ function MainApp() {
 
                 // Batch update state
                 setProjectName(projectData.projectName || "Loaded Project");
-                setProjectMetadata(projectData.metadata || null);
                 setMaterials(projectData.materials || SAMPLE_MATERIALS);
                 setPolygons(projectData.polygons || []);
                 setPointLoads(projectData.pointLoads || []);
@@ -416,7 +414,6 @@ function MainApp() {
             authorName: user.name,
             authorEmail: user.email
         };
-        setProjectMetadata(metadata);
 
         const projectData: ProjectFile = {
             version: APP_VERSION,
@@ -476,7 +473,6 @@ function MainApp() {
         try {
             // Batch update state
             setProjectName(projectData.projectName || "Loaded Project");
-            setProjectMetadata(projectData.metadata || null);
             setMaterials(projectData.materials || SAMPLE_MATERIALS);
             setPolygons(projectData.polygons || []);
             setPointLoads(projectData.pointLoads || []);
@@ -610,20 +606,16 @@ function MainApp() {
     const [stagingSideBarOpen, setStagingSideBarOpen] = useState(false);
     const [resultSideBarOpen, setResultSideBarOpen] = useState(false);
     const isWindowSizeSmall = window.innerWidth < 768;
+    const isInputTab = activeTab === WizardTab.INPUT || activeTab === WizardTab.MESH || activeTab === WizardTab.STAGING;
 
     return (
-        <div className="flex flex-col h-screen overflow-hidden bg-slate-900 text-slate-100 selection:bg-blue-500/30">
+        <div className="flex flex-col h-screen overflow-hidden bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 selection:bg-blue-500/30">
             {!isValid && <AuthModal />}
-            <WizardHeader
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-                drawMode={drawMode}
-                onDrawModeChange={setDrawMode}
-                onOpenSettings={() => setIsSettingsModalOpen(true)}
-                onImportDXF={handleImportDXF}
+
+            <AppHeader
                 projectName={projectName}
                 setProjectName={setProjectName}
-                projectMetadata={projectMetadata}
+                onOpenSettings={() => setIsSettingsModalOpen(true)}
                 onSaveProject={handleSaveProject}
                 onLoadProject={handleLoadProject}
                 onCloudSave={handleCloudSave}
@@ -633,16 +625,48 @@ function MainApp() {
             />
 
             <div className="flex-1 flex overflow-hidden relative">
-                <div className="flex flex-col h-full z-10">
-                    {activeTab === WizardTab.INPUT && (
-                        <>
-                            <div className={`md:hidden block absolute top-0 w-10 p-2 h-full border-r border-slate-700 bg-slate-900 ${inputSideBarOpen ? 'translate-x-[calc(100vw-40px)]' : 'translate-x-0'} transition`}>
-                                <button onClick={() => setInputSideBarOpen(!inputSideBarOpen)}>
-                                    <PanelLeftClose className={`w-6 h-6 ${inputSideBarOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                            </div>
-                            {isWindowSizeSmall && (
-                                <div className={`absolute top-0 left-0 z-10 ${inputSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
+
+                {isInputTab && (
+                    <div className="flex h-full z-10 md:w-[400px] w-0">
+                        {activeTab === WizardTab.INPUT && (
+                            <>
+                                <InputToolbar
+                                    drawMode={drawMode}
+                                    onDrawModeChange={setDrawMode}
+                                    onImportDXF={handleImportDXF}
+                                />
+                                <div className={`md:hidden block absolute top-1 w-10 p-2 z-10 h-full  ${inputSideBarOpen ? 'translate-x-[calc(100vw-40px)] dark:bg-slate-900 bg-slate-100' : 'translate-x-0'} transition`}>
+                                    <button onClick={() => setInputSideBarOpen(!inputSideBarOpen)}>
+                                        <PanelLeftClose className={`w-6 h-6 ${inputSideBarOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+                                </div>
+                                {isWindowSizeSmall && (
+                                    <div className={`absolute top-0 left-0 z-10 ${inputSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
+                                        <InputSidebar
+                                            materials={materials}
+                                            polygons={polygons}
+                                            pointLoads={pointLoads}
+                                            lineLoads={lineLoads}
+                                            waterLevels={waterLevels} // NEW
+                                            onUpdateMaterials={setMaterials}
+                                            onUpdatePolygons={setPolygons}
+                                            onUpdateLoads={setPointLoads}
+                                            onUpdateLineLoads={setLineLoads}
+                                            onAddWaterLevel={handleAddWaterLevel} // NEW
+                                            onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
+                                            onDeleteWaterPoint={handleDeleteWaterPoint} // NEW
+                                            onUpdatePolygonPoints={handleUpdatePolygonPoints}
+                                            onEditMaterial={setEditingMaterial}
+                                            onDeleteMaterial={handleDeleteMaterial}
+                                            onDeletePolygon={handleDeletePolygon}
+                                            onDeleteLoad={handleDeleteLoad}
+                                            onDeleteWaterLevel={handleDeleteWaterLevel}
+                                            selectedEntity={selectedEntity}
+                                            onSelectEntity={setSelectedEntity}
+                                        />
+                                    </div>
+                                )}
+                                {!isWindowSizeSmall && (
                                     <InputSidebar
                                         materials={materials}
                                         polygons={polygons}
@@ -665,43 +689,29 @@ function MainApp() {
                                         selectedEntity={selectedEntity}
                                         onSelectEntity={setSelectedEntity}
                                     />
+                                )}
+                            </>
+                        )}
+
+                        {activeTab === WizardTab.MESH && (
+                            <>
+                                <div className={`md:hidden block absolute top-1 w-10 p-2 h-full ${meshSideBarOpen ? 'translate-x-[calc(100vw-40px)] dark:bg-slate-900 bg-slate-100' : 'translate-x-0'} transition`}>
+                                    <button onClick={() => setMeshSideBarOpen(!meshSideBarOpen)}>
+                                        <PanelLeftClose className={`w-6 h-6 ${meshSideBarOpen ? 'rotate-180' : ''}`} />
+                                    </button>
                                 </div>
-                            )}
-                            {!isWindowSizeSmall && (
-                                <InputSidebar
-                                    materials={materials}
-                                    polygons={polygons}
-                                    pointLoads={pointLoads}
-                                    lineLoads={lineLoads}
-                                    waterLevels={waterLevels} // NEW
-                                    onUpdateMaterials={setMaterials}
-                                    onUpdatePolygons={setPolygons}
-                                    onUpdateLoads={setPointLoads}
-                                    onUpdateLineLoads={setLineLoads}
-                                    onAddWaterLevel={handleAddWaterLevel} // NEW
-                                    onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
-                                    onDeleteWaterPoint={handleDeleteWaterPoint} // NEW
-                                    onUpdatePolygonPoints={handleUpdatePolygonPoints}
-                                    onEditMaterial={setEditingMaterial}
-                                    onDeleteMaterial={handleDeleteMaterial}
-                                    onDeletePolygon={handleDeletePolygon}
-                                    onDeleteLoad={handleDeleteLoad}
-                                    onDeleteWaterLevel={handleDeleteWaterLevel}
-                                    selectedEntity={selectedEntity}
-                                    onSelectEntity={setSelectedEntity}
-                                />
-                            )}
-                        </>
-                    )}
-                    {activeTab === WizardTab.MESH && (
-                        <>
-                            <div className={`md:hidden block absolute top-0 w-10 p-2 h-full border-r border-slate-700 bg-slate-900 ${meshSideBarOpen ? 'translate-x-[calc(100vw-40px)]' : 'translate-x-0'} transition`}>
-                                <button onClick={() => setMeshSideBarOpen(!meshSideBarOpen)}>
-                                    <PanelLeftClose className={`w-6 h-6 ${meshSideBarOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                            </div>
-                            {isWindowSizeSmall && (
-                                <div className={`absolute top-0 left-0 z-10 ${meshSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
+                                {isWindowSizeSmall && (
+                                    <div className={`absolute top-0 left-0 z-10 ${meshSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
+                                        <MeshSidebar
+                                            mesh={meshResponse}
+                                            isGenerating={isGeneratingMesh}
+                                            onGenerate={handleGenerateMesh}
+                                            meshSettings={meshSettings}
+                                            onSettingsChange={setMeshSettings}
+                                        />
+                                    </div>
+                                )}
+                                {!isWindowSizeSmall && (
                                     <MeshSidebar
                                         mesh={meshResponse}
                                         isGenerating={isGeneratingMesh}
@@ -709,28 +719,32 @@ function MainApp() {
                                         meshSettings={meshSettings}
                                         onSettingsChange={setMeshSettings}
                                     />
+                                )}
+                            </>
+                        )}
+
+                        {activeTab === WizardTab.STAGING && (
+                            <>
+                                <div className={`md:hidden block absolute top-1 w-10 p-2 h-full ${stagingSideBarOpen ? 'translate-x-[calc(100vw-40px)] dark:bg-slate-900 bg-slate-100' : 'translate-x-0'} transition`}>
+                                    <button onClick={() => setStagingSideBarOpen(!stagingSideBarOpen)}>
+                                        <PanelLeftClose className={`w-6 h-6 ${stagingSideBarOpen ? 'rotate-180' : ''}`} />
+                                    </button>
                                 </div>
-                            )}
-                            {!isWindowSizeSmall && (
-                                <MeshSidebar
-                                    mesh={meshResponse}
-                                    isGenerating={isGeneratingMesh}
-                                    onGenerate={handleGenerateMesh}
-                                    meshSettings={meshSettings}
-                                    onSettingsChange={setMeshSettings}
-                                />
-                            )}
-                        </>
-                    )}
-                    {activeTab === WizardTab.STAGING && (
-                        <>
-                            <div className={`md:hidden block absolute top-0 w-10 p-2 h-full border-r border-slate-700 bg-slate-900 ${stagingSideBarOpen ? 'translate-x-[calc(100vw-40px)]' : 'translate-x-0'} transition`}>
-                                <button onClick={() => setStagingSideBarOpen(!stagingSideBarOpen)}>
-                                    <PanelLeftClose className={`w-6 h-6 ${stagingSideBarOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                            </div>
-                            {isWindowSizeSmall && (
-                                <div className={`absolute top-0 left-0 z-10 ${stagingSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
+                                {isWindowSizeSmall && (
+                                    <div className={`absolute top-0 left-0 z-10 ${stagingSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
+                                        <StagingSidebar
+                                            phases={phases}
+                                            currentPhaseIdx={currentPhaseIdx}
+                                            polygons={polygons}
+                                            pointLoads={pointLoads}
+                                            lineLoads={lineLoads}
+                                            waterLevels={waterLevels} // NEW
+                                            onPhasesChange={setPhases}
+                                            onSelectPhase={setCurrentPhaseIdx}
+                                        />
+                                    </div>
+                                )}
+                                {!isWindowSizeSmall && (
                                     <StagingSidebar
                                         phases={phases}
                                         currentPhaseIdx={currentPhaseIdx}
@@ -741,121 +755,127 @@ function MainApp() {
                                         onPhasesChange={setPhases}
                                         onSelectPhase={setCurrentPhaseIdx}
                                     />
-                                </div>
-                            )}
-                            {!isWindowSizeSmall && (
-                                <StagingSidebar
-                                    phases={phases}
-                                    currentPhaseIdx={currentPhaseIdx}
-                                    polygons={polygons}
-                                    pointLoads={pointLoads}
-                                    lineLoads={lineLoads}
-                                    waterLevels={waterLevels} // NEW
-                                    onPhasesChange={setPhases}
-                                    onSelectPhase={setCurrentPhaseIdx}
-                                />
-                            )}
-                        </>
-                    )}
-                </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
+                <div className="flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 relative">
 
-                <div className="flex-1 relative bg-slate-950 overflow-hidden">
-                    {activeTab === WizardTab.INPUT && (
-                        <InputCanvas
-                            polygons={polygons}
-                            pointLoads={pointLoads}
-                            lineLoads={lineLoads}
-                            materials={materials}
-                            water_levels={waterLevels} // NEW
-                            drawMode={drawMode}
-                            onAddPolygon={handleAddPolygon}
-                            onAddPointLoad={handleAddPointLoad}
-                            onAddLineLoad={handleAddLineLoad}
-                            onAddWaterLevel={handleAddWaterLevel}
-                            onCancelDraw={() => setDrawMode(null)}
-                            selectedEntity={selectedEntity}
-                            onSelectEntity={setSelectedEntity}
-                            onDeletePolygon={handleDeletePolygon}
-                            onDeleteLoad={handleDeleteLoad}
-                            onDeleteWaterLevel={handleDeleteWaterLevel}
-                            onUpdatePolygon={handleUpdatePolygon}
-                            onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
-                            activeTab={activeTab}
-                            currentPhaseType={currentPhase?.phase_type}
-                            generalSettings={generalSettings}
-                        />
-                    )}
+                    <WizardNavigation
+                        activeTab={activeTab}
+                        onTabChange={setActiveTab}
+                    />
 
-                    {activeTab === WizardTab.STAGING && (
-                        <InputCanvas
-                            polygons={polygons}
-                            pointLoads={pointLoads}
-                            lineLoads={lineLoads}
-                            materials={materials}
-                            water_levels={waterLevels} // NEW
-                            activePolygonIndices={currentPhase?.active_polygon_indices}
-                            activeLoadIds={currentPhase?.active_load_ids}
-                            activeWaterLevelId={currentPhase?.active_water_level_id} // NEW
-                            drawMode={null}
-                            onAddPolygon={() => { }}
-                            onAddPointLoad={() => { }}
-                            onAddLineLoad={() => { }}
-                            onAddWaterLevel={() => { }}
-                            onCancelDraw={() => { }}
-                            selectedEntity={null}
-                            onSelectEntity={() => { }}
-                            onDeletePolygon={() => { }}
-                            onDeleteLoad={() => { }}
-                            onDeleteWaterLevel={() => { }}
-                            onToggleActive={handleToggleActive}
-                            onUpdatePolygon={handleUpdatePolygon}
-                            activeTab={activeTab}
-                            currentPhaseType={currentPhase?.phase_type}
-                            generalSettings={generalSettings}
-                            materialOverrides={currentPhase?.material_overrides}
-                            onOverrideMaterial={handleOverrideMaterial}
-                            onUpdateWaterLevel={() => { }}
-                        />
-                    )}
+                    <div className="flex-1 h-[calc(100vh-100px)] relative bg-slate-50 dark:bg-slate-950 mx-2 mb-2 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        {activeTab === WizardTab.INPUT && (
+                            <InputCanvas
+                                polygons={polygons}
+                                pointLoads={pointLoads}
+                                lineLoads={lineLoads}
+                                materials={materials}
+                                water_levels={waterLevels} // NEW
+                                drawMode={drawMode}
+                                onAddPolygon={handleAddPolygon}
+                                onAddPointLoad={handleAddPointLoad}
+                                onAddLineLoad={handleAddLineLoad}
+                                onAddWaterLevel={handleAddWaterLevel}
+                                onCancelDraw={() => setDrawMode(null)}
+                                selectedEntity={selectedEntity}
+                                onSelectEntity={setSelectedEntity}
+                                onDeletePolygon={handleDeletePolygon}
+                                onDeleteLoad={handleDeleteLoad}
+                                onDeleteWaterLevel={handleDeleteWaterLevel}
+                                onUpdatePolygon={handleUpdatePolygon}
+                                onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
+                                activeTab={activeTab}
+                                currentPhaseType={currentPhase?.phase_type}
+                                generalSettings={generalSettings}
+                            />
+                        )}
 
-                    {activeTab === WizardTab.MESH && (
-                        <div className="w-full h-full flex items-center justify-center relative">
-                            {meshResponse?.success ? (
+                        {activeTab === WizardTab.STAGING && (
+                            <InputCanvas
+                                polygons={polygons}
+                                pointLoads={pointLoads}
+                                lineLoads={lineLoads}
+                                materials={materials}
+                                water_levels={waterLevels} // NEW
+                                activePolygonIndices={currentPhase?.active_polygon_indices}
+                                activeLoadIds={currentPhase?.active_load_ids}
+                                activeWaterLevelId={currentPhase?.active_water_level_id} // NEW
+                                drawMode={null}
+                                onAddPolygon={() => { }}
+                                onAddPointLoad={() => { }}
+                                onAddLineLoad={() => { }}
+                                onAddWaterLevel={() => { }}
+                                onCancelDraw={() => { }}
+                                selectedEntity={null}
+                                onSelectEntity={() => { }}
+                                onDeletePolygon={() => { }}
+                                onDeleteLoad={() => { }}
+                                onDeleteWaterLevel={() => { }}
+                                onToggleActive={handleToggleActive}
+                                onUpdatePolygon={handleUpdatePolygon}
+                                activeTab={activeTab}
+                                currentPhaseType={currentPhase?.phase_type}
+                                generalSettings={generalSettings}
+                                materialOverrides={currentPhase?.material_overrides}
+                                onOverrideMaterial={handleOverrideMaterial}
+                                onUpdateWaterLevel={() => { }}
+                            />
+                        )}
+
+                        {activeTab === WizardTab.MESH && (
+                            <div className="w-full h-full flex items-center justify-center relative">
+                                {meshResponse?.success ? (
+                                    <OutputCanvas
+                                        mesh={meshResponse}
+                                        polygon={polygons}
+                                        solverResult={null}
+                                        currentPhaseIdx={0}
+                                        phases={phases}
+                                        showControls={false}
+                                        ignorePhases={true}
+                                        generalSettings={generalSettings}
+                                        materials={materials}
+                                    />
+                                ) : (
+                                    <div className="text-slate-500 text-sm animate-pulse">Click "Generate Mesh" to see the mesh</div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === WizardTab.RESULT && (
+                            <div className="w-full h-full relative z-30">
                                 <OutputCanvas
                                     mesh={meshResponse}
                                     polygon={polygons}
-                                    solverResult={null}
-                                    currentPhaseIdx={0}
+                                    solverResult={solverResponse}
+                                    currentPhaseIdx={currentPhaseIdx}
                                     phases={phases}
-                                    showControls={false}
-                                    ignorePhases={true}
                                     generalSettings={generalSettings}
                                     materials={materials}
                                 />
-                            ) : (
-                                <div className="text-slate-500 text-sm animate-pulse">Click "Generate Mesh" to see the mesh</div>
-                            )}
-                        </div>
-                    )}
-
-                    {activeTab === WizardTab.RESULT && (
-                        <div className="w-full h-full relative z-30">
-                            <OutputCanvas
-                                mesh={meshResponse}
-                                polygon={polygons}
-                                solverResult={solverResponse}
-                                currentPhaseIdx={currentPhaseIdx}
-                                phases={phases}
-                                generalSettings={generalSettings}
-                                materials={materials}
-                            />
-                            <div className={`md:hidden block absolute top-0 right-0 w-10 p-2 h-full border-l border-slate-700 bg-slate-900 z-48 ${resultSideBarOpen ? '-translate-x-[calc(100vw-40px)]' : 'translate-x-0'} transition`}>
-                                <button onClick={() => setResultSideBarOpen(!resultSideBarOpen)}>
-                                    <PanelLeftClose className={`w-6 h-6 ${resultSideBarOpen ? '' : 'rotate-180'}`} />
-                                </button>
-                            </div>
-                            {isWindowSizeSmall && (
-                                <div className={`relative absolute top-0 right-0 w-full h-full z-44 ${resultSideBarOpen ? 'translate-x-0' : 'translate-x-[calc(100vw-32px)]'} transition`}>
+                                <div className={`md:hidden flex items-start justify-center absolute top-0 right-0 w-12 p-2 h-full border-x dark:border-slate-700 border-slate-200 dark:bg-slate-900 bg-slate-100 z-48 ${resultSideBarOpen ? '-translate-x-[calc(100vw-60px)]' : 'translate-x-0'} transition`}>
+                                    <button onClick={() => setResultSideBarOpen(!resultSideBarOpen)}>
+                                        <PanelLeftClose className={`w-6 h-6 ${resultSideBarOpen ? '' : 'rotate-180'}`} />
+                                    </button>
+                                </div>
+                                {isWindowSizeSmall && (
+                                    <div className={`relative absolute top-0 right-0 w-full h-full z-44 ${resultSideBarOpen ? 'translate-x-0' : 'translate-x-[calc(100vw-32px)]'} transition`}>
+                                        <ResultSidebar
+                                            solverResult={solverResponse}
+                                            isRunning={isRunningAnalysis}
+                                            onRun={handleRunAnalysis}
+                                            onCancel={handleCancelAnalysis}
+                                            phases={phases}
+                                            currentPhaseIdx={currentPhaseIdx}
+                                            onSelectPhase={setCurrentPhaseIdx}
+                                        />
+                                    </div>
+                                )}
+                                {!isWindowSizeSmall && (
                                     <ResultSidebar
                                         solverResult={solverResponse}
                                         isRunning={isRunningAnalysis}
@@ -864,24 +884,14 @@ function MainApp() {
                                         phases={phases}
                                         currentPhaseIdx={currentPhaseIdx}
                                         onSelectPhase={setCurrentPhaseIdx}
+                                        liveStepPoints={liveStepPoints}
                                     />
-                                </div>
-                            )}
-                            {!isWindowSizeSmall && (
-                                <ResultSidebar
-                                    solverResult={solverResponse}
-                                    isRunning={isRunningAnalysis}
-                                    onRun={handleRunAnalysis}
-                                    onCancel={handleCancelAnalysis}
-                                    phases={phases}
-                                    currentPhaseIdx={currentPhaseIdx}
-                                    onSelectPhase={setCurrentPhaseIdx}
-                                    liveStepPoints={liveStepPoints}
-                                />
-                            )}
-                        </div>
-                    )}
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
+
             </div>
 
             {editingMaterial && (
@@ -917,9 +927,9 @@ function MainApp() {
                 />
             )}
 
-            <div className="md:block hidden fixed bottom-3 right-3 z-[100] items-center justify-center flex flex-col bg-slate-900/90 backdrop-blur-md py-2 px-4 rounded-xl border border-slate-700 shadow-2xl text-slate-400 z-[20]">
-                <div className="text-[10px] text-center">Copyright © 2026 | Dahar Engineer</div>
-                <div className="text-[10px] border-b border-slate-700 w-full text-center">All rights reserved.</div>
+            <div className="md:block hidden fixed bottom-3 right-3 z-[100] items-center justify-center flex flex-col dark:bg-slate-900/90 bg-slate-100/90 backdrop-blur-md py-2 px-4 rounded-xl border dark:border-slate-700 border-slate-200 shadow-2xl text-slate-400 z-[20]">
+                <div className="text-[10px] text-center">TerraSim v{APP_VERSION} (Beta) | Copyright © 2026</div>
+                <div className="text-[10px] border-b pb-1 mb-1 dark:border-slate-700 border-slate-200 w-full text-center">Dahar Engineer | All rights reserved.</div>
                 <div className="text-[8px] text-center">This software is still under development.</div>
                 <div className="text-[8px] text-center">Please use it at your own risk.</div>
             </div>

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
 
 @theme {
   --color-primary: #3b82f6;
@@ -8,7 +9,7 @@
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  @apply bg-slate-900 text-slate-100 overflow-hidden;
+  @apply bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden;
 }
 
 #root {
@@ -23,11 +24,11 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  @apply bg-slate-800/50;
+  @apply bg-slate-200/50 dark:bg-slate-800/50;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-slate-700 rounded-full hover:bg-slate-600 transition-colors;
+  @apply bg-slate-400 dark:bg-slate-700 rounded-full hover:bg-slate-500 dark:hover:bg-slate-600 transition-colors;
 }
 
 /* Selection */
@@ -36,19 +37,37 @@ body {
 }
 
 .dropdownlabel {
-  @apply cursor-pointer w-full flex items-center justify-between px-4 py-2 bg-slate-800 text-sm font-semibold text-slate-400 tracking-wider border-b border-slate-700;
+  @apply cursor-pointer w-full flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 tracking-wider border-b border-slate-200 dark:border-slate-700;
+}
+
+.dropdownlabel2 {
+  @apply cursor-pointer w-full flex items-center justify-between px-4 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 tracking-wider border-b border-slate-200 dark:border-slate-700;
+}
+
+
+.dropdownlabel3 {
+  @apply cursor-pointer w-full flex items-center justify-between px-4 py-1 rounded-lg bg-gradient-to-tr from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-sm font-semibold text-slate-600 dark:text-slate-400 tracking-wider border-b border-slate-200 dark:border-slate-700;
+}
+
+
+.buttonlabel {
+  @apply cursor-pointer w-full flex items-center gap-2 px-4 py-4 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-sm font-semibold text-slate-600 dark:text-slate-400 tracking-wider border-b border-slate-200 dark:border-slate-700;
+}
+
+.label2 {
+  @apply cursor-pointer w-full flex items-center justify-between px-4 py-4 rounded-lg bg-slate-100 dark:bg-slate-900 text-sm font-semibold text-slate-600 dark:text-slate-400 tracking-wider;
 }
 
 .titlelabel {
-  @apply text-sm font-semibold text-slate-100;
+  @apply text-sm font-semibold text-slate-900 dark:text-slate-100;
 }
 
 .itemlabel {
-  @apply text-xs text-slate-100;
+  @apply text-xs text-slate-900 dark:text-slate-100;
 }
 
 .sublabel {
-  @apply text-[9px] text-slate-300;
+  @apply text-[9px] text-slate-500 dark:text-slate-300;
 }
 
 .transition {
@@ -64,13 +83,43 @@ body {
 }
 
 .input {
-  @apply w-full bg-slate-800 text-xs border border-slate-700 text-slate-100 p-2 rounded outline-none transition-colors;
+  @apply w-full bg-white dark:bg-slate-800 text-xs border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 p-2 rounded outline-none transition-colors;
 }
 
 .input:focus {
   @apply border-blue-500;
 }
 
+@keyframes shake {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  20% {
+    transform: rotate(15deg);
+  }
+
+  40% {
+    transform: rotate(-15deg);
+  }
+
+  60% {
+    transform: rotate(10deg);
+  }
+
+  80% {
+    transform: rotate(-10deg);
+  }
+
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@utility shake {
+  animation: shake 0.5s ease-in-out;
+}
+
 .description2 {
-  @apply text-sm text-slate-300 leading-relaxed mb-2 font-normal;
+  @apply text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-2 font-normal;
 }

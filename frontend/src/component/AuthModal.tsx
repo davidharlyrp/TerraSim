@@ -35,56 +35,56 @@ export const AuthModal: React.FC = () => {
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-            <div className="bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl w-full max-w-md space-y-6">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-8 rounded-2xl shadow-2xl w-full max-w-md space-y-6">
                 <div className="text-center space-y-2">
                     <img src="/Logo.png" alt="Logo" className="w-20 h-20 mx-auto" />
-                    <h2 className="text-2xl font-bold text-white tracking-tight">Terra Sim</h2>
-                    <p className="text-slate-400 text-sm">Please sign in to continue your analysis</p>
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Terra Sim</h2>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">Please sign in to continue</p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest pl-1">Email</label>
+                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 uppercase tracking-widest pl-1">Email</label>
                         <input
                             type="email"
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                             placeholder="name@example.com"
                         />
                     </div>
                     <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest pl-1">Password</label>
+                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 uppercase tracking-widest pl-1">Password</label>
                         <input
                             type="password"
                             required
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                             placeholder="••••••••"
                         />
                     </div>
 
-                    {error && <div className="text-red-400 text-xs text-center bg-red-400/10 p-2 rounded-lg">{error}</div>}
+                    {error && <div className="text-rose-600 dark:text-red-400 text-xs text-center bg-rose-50 dark:bg-red-400/10 p-2 rounded-lg border border-rose-200 dark:border-transparent">{error}</div>}
 
                     <button
                         type="submit"
                         disabled={loading}
-                        className="cursor-pointer w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl shadow-blue-500/20 transition-all disabled:opacity-50"
+                        className="cursor-pointer w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl shadow-lg shadow-blue-500/20 transition-all disabled:opacity-50"
                     >
                         {loading ? 'Processing...' : (isLogin ? 'Login' : 'Sign Up')}
                     </button>
                 </form>
 
                 <div className="relative">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-700"></div></div>
-                    <div className="relative flex justify-center text-[10px] uppercase font-bold text-slate-500 px-2 bg-slate-900 mx-auto w-fit">Or continue with</div>
+                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700"></div></div>
+                    <div className="relative flex justify-center text-[10px] uppercase font-bold text-slate-500 px-2 bg-white dark:bg-slate-900 mx-auto w-fit">Or continue with</div>
                 </div>
 
                 <button
                     onClick={loginWithGoogle}
-                    className="cursor-pointer w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 font-semibold py-3 rounded-xl transition-all"
+                    className="cursor-pointer w-full flex items-center justify-center gap-3 bg-slate-50 hover:bg-slate-100 dark:bg-white dark:hover:bg-slate-100 text-slate-900 font-semibold py-3 rounded-xl transition-all border border-slate-200 dark:border-transparent"
                 >
                     <svg className="w-5 h-5" viewBox="0 0 24 24">
                         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -98,7 +98,7 @@ export const AuthModal: React.FC = () => {
                 <div className="text-center">
                     <button
                         onClick={() => setIsLogin(!isLogin)}
-                        className="cursor-pointer text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                        className="cursor-pointer text-xs text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 transition-colors"
                     >
                         {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Login"}
                     </button>

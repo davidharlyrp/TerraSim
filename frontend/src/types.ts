@@ -257,5 +257,4 @@ export enum OutputType {
 export interface GeneralSettings {
     snapToGrid: boolean;
     snapSpacing: number;
-    dark_background_color: boolean;
 }

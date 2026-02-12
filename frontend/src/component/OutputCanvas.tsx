@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { MeshResponse, SolverResponse, OutputType, PhaseRequest, PolygonData, Material, GeneralSettings } from '../types';
 import { MathRender } from './Math';
 import { ChevronDown } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface OutputCanvasProps {
     mesh: MeshResponse | null;
@@ -515,11 +516,12 @@ const Polygon = ({ data }: PolygonProps) => {
         pts.push(pts[0]); // Close outline
         return { shape, points: pts };
     }, [data]);
+    let lineColor = useTheme().theme === 'dark' ? 'white' : '#88909d';
 
     return (
         <group onContextMenu={(e) => { e.nativeEvent.preventDefault(); e.stopPropagation(); }}>
             {/* Outline */}
-            <Line points={points} color={"#fafafa"} lineWidth={2} />
+            <Line points={points} color={lineColor} lineWidth={2} />
         </group>
     );
 };
@@ -539,12 +541,12 @@ const Legend = ({ min, max, label, visible, outputType }: { min: number, max: nu
         : 'linear-gradient(to right, #000080, #0000FF, #00FFFF, #FFFF00, #FF0000, #800000)';
 
     return (
-        <div className="fixed bottom-5 right-0 left-0 mx-auto w-fit z-52 items-center justify-center flex flex-col bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-700 shadow-2xl text-white z-[20]">
+        <div className="fixed bottom-5 right-0 left-0 mx-auto w-fit z-52 items-center justify-center flex flex-col bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xl text-slate-900 dark:text-white z-[20]">
             <div className="text-xs font-semibold mb-2 tracking-widest">{label}</div>
             <div className="flex items-center gap-3">
-                <div className="text-[10px] font-mono text-slate-400">{formatValue(min)}</div>
-                <div className="w-32 h-3 rounded-full border border-white/20" style={{ background: gradient }}></div>
-                <div className="text-[10px] font-mono text-slate-400">{formatValue(max)}</div>
+                <div className="text-[10px] font-mono text-slate-600 dark:text-slate-400">{formatValue(min)}</div>
+                <div className="w-32 h-3 rounded-full border border-slate-900/20 dark:border-white/20" style={{ background: gradient }}></div>
+                <div className="text-[10px] font-mono text-slate-600 dark:text-slate-400">{formatValue(max)}</div>
             </div>
         </div>
     );
@@ -558,7 +560,6 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
     phases,
     showControls = true,
     ignorePhases = false,
-    generalSettings,
     materials
 }) => {
     const [sliderValue, setSliderValue] = useState(100);
@@ -588,7 +589,8 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
         setRange({ min, max, label });
     }, []);
 
-    const backgroundColor = generalSettings.dark_background_color ? "bg-slate-900" : "bg-gray-100";
+    const { theme } = useTheme();
+    const backgroundColor = theme === 'dark' ? "bg-slate-950" : "bg-slate-50";
     const isMobile = window.innerWidth < 768;
 
     const [hoveredItem, setHoveredItem] = useState<{
@@ -603,13 +605,13 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
             {showControls && (
                 <div className="absolute top-4 md:bottom-4 left-10 right-4 z-16 w-64 flex mx-auto md:mx-0 flex-col gap-4">
                     {/* Control Panel */}
-                    <div className="bg-slate-900/90 backdrop-blur-md md:p-5 p-2 px-5 rounded-xl border border-slate-700 shadow-2xl md:space-y-4 space-y-2 shrink-0">
+                    <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md md:p-5 p-2 px-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xl md:space-y-4 space-y-2 shrink-0">
                         <div>
-                            <label className="block text-[10px] font-semibold text-slate-500 mb-2 tracking-widest">Output View</label>
+                            <label className="block text-[10px] font-semibold text-slate-700 dark:text-slate-500 mb-2 tracking-widest">Output View</label>
                             <select
                                 value={outputType}
                                 onChange={(e) => setOutputType(e.target.value as OutputType)}
-                                className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs p-2 rounded outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-xs p-2 rounded outline-none focus:border-blue-500 transition-colors cursor-pointer"
                             >
                                 <option value={OutputType.DEFORMED_MESH}>Deformed Mesh</option>
                                 <option value={OutputType.DEFORMED_CONTOUR}>Deformed Contour</option>
@@ -627,14 +629,14 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                         {outputType === OutputType.DEFORMED_MESH && (
                             <div>
                                 <div className="flex justify-between items-center mb-2">
-                                    <label className="text-[10px] font-semibold text-slate-500 tracking-widest uppercase">Deformation Scale</label>
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest uppercase">Deformation Scale</label>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-mono bg-blue-500/10 px-1.5 py-0.5 rounded">
+                                        <span className="text-[10px] font-mono bg-blue-100 dark:bg-blue-500/10 px-1.5 py-0.5 rounded text-blue-800 dark:text-blue-100">
                                             {scale < 10 ? scale.toFixed(2) : scale.toFixed(0)}x
                                         </span>
                                         <button
                                             onClick={() => setSliderValue(10)}
-                                            className="text-[10px] text-slate-400 hover:text-white transition-colors"
+                                            className="text-[10px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
                                             title="Reset to 10x"
                                         >
                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -650,13 +652,13 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                     step="1"
                                     value={sliderValue}
                                     onChange={(e) => setSliderValue(Number(e.target.value))}
-                                    className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                    className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
                                 />
                             </div>
                         )}
 
                         {/* Point Display Toggles */}
-                        <div className="pt-2 grid grid-cols-2 gap-2 items-center border-t border-slate-700">
+                        <div className="pt-2 grid grid-cols-2 gap-2 items-center border-t border-slate-200 dark:border-slate-700">
                             <label className="flex items-center gap-2 cursor-pointer group">
                                 <input
                                     type="checkbox"
@@ -664,7 +666,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                     onChange={(e) => setShowNodes(e.target.checked)}
                                     className="w-3 h-3 accent-blue-500 cursor-pointer"
                                 />
-                                <span className="text-[10px] font-semibold text-slate-500 group-hover:text-slate-300 transition-colors tracking-widest">
+                                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 group-hover:text-slate-900 dark:group-hover:text-slate-300 transition-colors tracking-widest">
                                     Nodes
                                 </span>
                             </label>
@@ -675,7 +677,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                     onChange={(e) => setShowGaussPoints(e.target.checked)}
                                     className="w-3 h-3 accent-blue-500 cursor-pointer"
                                 />
-                                <span className="text-[10px] font-semibold text-slate-500 group-hover:text-slate-300 transition-colors tracking-widest">
+                                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 group-hover:text-slate-900 dark:group-hover:text-slate-300 transition-colors tracking-widest">
                                     Gauss Points
                                 </span>
                             </label>
@@ -683,20 +685,20 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 
                         {isMobile && (
                             <div className="">
-                                <div className="flex items-center justify-between border-t py-2 border-slate-700">
-                                    <label className="text-xs font-semibold text-slate-500 tracking-widest">Analysis Log Progress</label>
+                                <div className="flex items-center justify-between border-t py-2 border-slate-200 dark:border-slate-700">
+                                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 tracking-widest">Analysis Log Progress</label>
                                     <button
                                         onClick={() => setShowLog(!showLog)}
-                                        className="text-[10px] text-slate-400 hover:text-white transition-colors"
+                                        className="text-[10px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
                                         title="Toggle Log"
                                     >
                                         <ChevronDown className={showLog ? 'rotate-180 w-4 h-4' : 'w-4 h-4'} />
                                     </button>
                                 </div>
                                 {showLog && solverResult && solverResult.log && (
-                                    <div className="flex-1 overflow-y-auto p-2 font-mono text-[9px] max-h-[350px] text-slate-400 custom-scrollbar space-y-1">
+                                    <div className="flex-1 overflow-y-auto p-2 font-mono text-[9px] max-h-[350px] text-slate-600 dark:text-slate-400 custom-scrollbar space-y-1">
                                         {solverResult.log.map((line, i) => (
-                                            <div key={i} className="leading-relaxed border-b border-slate-800/50 pb-1 last:border-0 hover:text-slate-200 transition-colors">
+                                            <div key={i} className="leading-relaxed border-b border-slate-200 dark:border-slate-800/50 pb-1 last:border-0 hover:text-slate-900 dark:hover:text-slate-200 transition-colors">
                                                 {line}
                                             </div>
                                         ))}
@@ -709,13 +711,13 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 
                     {/* Log Panel */}
                     {!isMobile && solverResult && solverResult.log && (
-                        <div className="bg-slate-900/90 backdrop-blur-md flex flex-col rounded-xl border border-slate-700 shadow-2xl overflow-y-hidden h-[200px] flex-1">
-                            <div className="px-5 py-3 border-b border-slate-700 bg-slate-800/30">
-                                <label className="block text-xs font-semibold text-slate-500 tracking-widest">Analysis Log Progress</label>
+                        <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md flex flex-col rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-y-hidden h-[200px] flex-1">
+                            <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-500 tracking-widest">Analysis Log Progress</label>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-5 font-mono text-[9px] text-slate-400 custom-scrollbar space-y-1">
+                            <div className="flex-1 overflow-y-auto p-5 font-mono text-[9px] text-slate-600 dark:text-slate-400 custom-scrollbar space-y-1">
                                 {solverResult.log.map((line, i) => (
-                                    <div key={i} className="leading-relaxed border-b border-slate-800/50 pb-1 last:border-0 hover:text-slate-200 transition-colors">
+                                    <div key={i} className="leading-relaxed border-b border-slate-200 dark:border-slate-800/50 pb-1 last:border-0 hover:text-slate-900 dark:hover:text-slate-200 transition-colors">
                                         {line}
                                     </div>
                                 ))}
@@ -778,8 +780,8 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                         if (d) {
                                             const total = Math.sqrt(d.ux ** 2 + d.uy ** 2);
                                             content = (
-                                                <div className="text-[10px] w-30 bg-slate-800 text-white p-2 rounded shadow-lg border border-slate-600">
-                                                    <div className="font-bold border-b border-slate-600 mb-1">Node {nodeId}</div>
+                                                <div className="text-[10px] w-30 bg-white dark:bg-slate-800 text-slate-900 dark:text-white p-2 rounded shadow-lg border border-slate-200 dark:border-slate-600">
+                                                    <div className="font-bold border-b border-slate-200 dark:border-slate-600 mb-1">Node {nodeId}</div>
                                                     <div>Ux: {d.ux.toExponential(3)} m</div>
                                                     <div>Uy: {d.uy.toExponential(3)} m</div>
                                                     <div>|U|: {total.toExponential(3)} m</div>

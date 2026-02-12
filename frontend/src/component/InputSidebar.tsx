@@ -147,22 +147,24 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
 
 
     return (
-        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100vh-160px)] pb-30 overflow-y-auto bg-slate-900 border-r border-slate-700 custom-scrollbar">
+        <div className="md:w-full w-[calc(100vw-40px)] md:h-full h-[calc(100vh-50px)] pb-30 p-2 flex flex-col gap-2 overflow-y-auto bg-white dark:bg-slate-900 border-r md:border-0 border-slate-200 dark:border-slate-700 custom-scrollbar">
             {/* MATERIALS */}
-            <div className="dropdownlabel">Materials
-                <button
-                    onClick={() => { setIsMaterialOpen(!isMaterialOpen) }}
-                    className="cursor-pointer p-1.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 hover:text-white transition-colors">
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsMaterialOpen(!isMaterialOpen) }}>
+                Materials
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isMaterialOpen ? "rotate-180" : ""}`} />
-                </button>
-            </div>
+                </div>
+            </button>
             {isMaterialOpen && (
                 <div className="p-3 space-y-2">
                     {materials.map(mat => (
                         <div
                             key={mat.id}
                             onClick={() => onSelectEntity({ type: 'material', id: mat.id })}
-                            className={`flex flex-col gap-1 p-2 bg-slate-800 rounded-lg border transition-all cursor-pointer ${selectedEntity?.type === 'material' && selectedEntity.id === mat.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-700 hover:border-slate-600'}`}
+                            className={`flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border transition-all cursor-pointer ${selectedEntity?.type === 'material' && selectedEntity.id === mat.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}
                         >
                             <div className="flex items-center gap-2">
                                 <input
@@ -198,20 +200,22 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             )}
 
             {/* POLYGONS */}
-            <div className="dropdownlabel">Polygons
-                <button
-                    onClick={() => { setIsPolygonOpen(!isPolygonOpen) }}
-                    className="cursor-pointer p-1.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 hover:text-white transition-colors">
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsPolygonOpen(!isPolygonOpen) }}>
+                Polygons
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isPolygonOpen ? "rotate-180" : ""}`} />
-                </button>
-            </div>
+                </div>
+            </button>
             {isPolygonOpen && (
                 <div className="p-3 space-y-2">
                     {polygons.map((poly, i) => (
                         <div
                             key={i}
                             onClick={() => onSelectEntity({ type: 'polygon', id: i })}
-                            className={`flex flex-col gap-1 p-2 bg-slate-800 rounded-lg border transition-all cursor-pointer ${selectedEntity?.type === 'polygon' && selectedEntity.id === i ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-700'}`}
+                            className={`flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border transition-all cursor-pointer ${selectedEntity?.type === 'polygon' && selectedEntity.id === i ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-200 dark:border-slate-700'}`}
                         >
                             <div className="flex justify-between items-center">
                                 <span className="itemlabel">Poly {i + 1}</span>
@@ -219,7 +223,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                     <select
                                         value={poly.materialId}
                                         onChange={(e) => handleUpdatePolygonMat(i, e.target.value)}
-                                        className="cursor-pointer bg-slate-900 border border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-100 outline-none focus:border-blue-500"
+                                        className="cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500"
                                     >
                                         {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                     </select>
@@ -252,7 +256,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                     type="number"
                                                     value={v.x}
                                                     onChange={(e) => handleUpdatePolygonPoint(i, j, 'x', Number(e.target.value))}
-                                                    className="cursor-pointer bg-slate-900 border border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-100 outline-none focus:border-blue-500"
+                                                    className="cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500"
                                                 />
                                             </div>
                                             <div className='text-xs'>
@@ -264,7 +268,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                     type="number"
                                                     value={v.y}
                                                     onChange={(e) => handleUpdatePolygonPoint(i, j, 'y', Number(e.target.value))}
-                                                    className="cursor-pointer bg-slate-900 border border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-100 outline-none focus:border-blue-500"
+                                                    className="cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500"
                                                 />
                                             </div>
                                         </div>
@@ -277,29 +281,31 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             )}
 
             {/* WATER LEVELS */}
-            <div className="dropdownlabel">Water Levels
-                <button
-                    onClick={() => { setIsWaterOpen(!isWaterOpen) }}
-                    className="cursor-pointer p-1.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 hover:text-white transition-colors">
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsWaterOpen(!isWaterOpen) }}>
+                Water Levels
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isWaterOpen ? "rotate-180" : ""}`} />
-                </button>
-            </div>
+                </div>
+            </button>
             {isWaterOpen && (
                 <div className="p-3 space-y-2">
                     {waterLevels.map((wl, i) => (
-                        <div key={wl.id} className="bg-slate-800 rounded border border-slate-700 overflow-hidden">
+                        <div key={wl.id} className="bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 overflow-hidden">
                             <div
-                                className="flex items-center justify-between p-2 cursor-pointer hover:bg-slate-750"
+                                className="flex items-center justify-between p-2 cursor-pointer"
                                 onClick={() => setExpandedWaterLevelId(expandedWaterLevelId === wl.id ? null : wl.id)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <ChevronRight className={`w-3 h-3 text-slate-400 transition-transform ${expandedWaterLevelId === wl.id ? 'rotate-90' : ''}`} />
+                                    <ChevronRight className={`w-3 h-3 text-slate-500 dark:text-slate-400 transition-transform ${expandedWaterLevelId === wl.id ? 'rotate-90' : ''}`} />
                                     <input
                                         type="text"
                                         value={wl.name}
                                         onClick={(e) => e.stopPropagation()}
                                         onChange={(e) => handleRenameWaterLevel(i, e.target.value)}
-                                        className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none focus:border-b border-blue-500 w-32"
+                                        className="bg-transparent text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:border-b border-blue-500 w-32"
                                     />
                                 </div>
                                 <button
@@ -311,7 +317,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                             </div>
 
                             {expandedWaterLevelId === wl.id && (
-                                <div className="p-2 bg-slate-900/50 border-t border-slate-700 space-y-1">
+                                <div className="p-2 bg-slate-100/50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 space-y-1">
                                     <div className="flex px-1 mb-1 text-[10px] text-slate-500">
                                         <div className="w-1/2">X (m)</div>
                                         <div className="w-1/2">Y (m)</div>
@@ -323,13 +329,13 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 type="number"
                                                 value={pt.x}
                                                 onChange={(e) => handleUpdateWaterPoint(i, ptIdx, 'x', Number(e.target.value))}
-                                                className="w-1/2 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] px-1 py-0.5 rounded focus:border-blue-500 outline-none"
+                                                className="w-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[10px] px-1 py-0.5 rounded focus:border-blue-500 outline-none"
                                             />
                                             <input
                                                 type="number"
                                                 value={pt.y}
                                                 onChange={(e) => handleUpdateWaterPoint(i, ptIdx, 'y', Number(e.target.value))}
-                                                className="w-1/2 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] px-1 py-0.5 rounded focus:border-blue-500 outline-none"
+                                                className="w-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[10px] px-1 py-0.5 rounded focus:border-blue-500 outline-none"
                                             />
                                             <button
                                                 onClick={() => handleDeletePointFromWaterLevel(i, ptIdx)}
@@ -354,20 +360,22 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             )}
 
             {/* POINT LOADS */}
-            <div className="dropdownlabel">Point Loads
-                <button
-                    onClick={() => { setIsLoadOpen(!isLoadOpen) }}
-                    className="cursor-pointer p-1.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 hover:text-white transition-colors">
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsLoadOpen(!isLoadOpen) }}>
+                Point Loads
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isLoadOpen ? "rotate-180" : ""}`} />
-                </button>
-            </div>
+                </div>
+            </button>
             {isLoadOpen && (
                 <div className="p-4 space-y-2">
                     {pointLoads.map((load, i) => (
                         <div
                             key={load.id}
                             onClick={() => onSelectEntity({ type: 'load', id: load.id })}
-                            className={`flex flex-col gap-1 p-2 bg-slate-800 rounded border transition-all cursor-pointer ${selectedEntity?.type === 'load' && selectedEntity.id === load.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-700'}`}
+                            className={`flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-800 rounded border transition-all cursor-pointer ${selectedEntity?.type === 'load' && selectedEntity.id === load.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-200 dark:border-slate-700'}`}
                         >
                             <div className="flex justify-between items-center">
                                 <span className="itemlabel">{load.id}</span>
@@ -386,7 +394,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                             next[i] = { ...next[i], x: Number(e.target.value) };
                                             onUpdateLoads(next);
                                         }}
-                                        className="bg-slate-900 border border-slate-700 text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
+                                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
                                     />
                                 </div>
                                 <div className="flex flex-col gap-1">
@@ -399,7 +407,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                             next[i] = { ...next[i], y: Number(e.target.value) };
                                             onUpdateLoads(next);
                                         }}
-                                        className="bg-slate-900 border border-slate-700 text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
+                                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
                                     />
                                 </div>
                                 <div className="flex flex-col gap-1">
@@ -412,7 +420,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                             next[i] = { ...next[i], fx: Number(e.target.value) };
                                             onUpdateLoads(next);
                                         }}
-                                        className="bg-slate-900 border border-slate-700 text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
+                                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
                                     />
                                 </div>
                                 <div className="flex flex-col gap-1">
@@ -425,7 +433,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                             next[i] = { ...next[i], fy: Number(e.target.value) };
                                             onUpdateLoads(next);
                                         }}
-                                        className="bg-slate-900 border border-slate-700 text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
+                                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
                                     />
                                 </div>
                             </div>
@@ -436,20 +444,22 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             )}
 
             {/* LINE LOADS */}
-            <div className="dropdownlabel">Line Loads
-                <button
-                    onClick={() => { setIsLineLoadOpen(!isLineLoadOpen) }}
-                    className="cursor-pointer p-1.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 hover:text-white transition-colors">
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsLineLoadOpen(!isLineLoadOpen) }}>
+                Line Loads
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isLineLoadOpen ? "rotate-180" : ""}`} />
-                </button>
-            </div>
+                </div>
+            </button>
             {isLineLoadOpen && (
                 <div className="p-4 space-y-2">
                     {lineLoads.map((load, i) => (
                         <div
                             key={load.id}
                             onClick={() => onSelectEntity({ type: 'load', id: load.id })}
-                            className={`flex flex-col gap-1 p-2 bg-slate-800 rounded border transition-all cursor-pointer ${selectedEntity?.type === 'load' && selectedEntity.id === load.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-700'}`}
+                            className={`flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-800 rounded border transition-all cursor-pointer ${selectedEntity?.type === 'load' && selectedEntity.id === load.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-200 dark:border-slate-700'}`}
                         >
                             <div className="flex justify-between items-center">
                                 <span className="itemlabel">{load.id}</span>
@@ -459,7 +469,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                                 <div className="flex flex-col gap-1 text-[10px]">
-                                    <span className="sublabel text-slate-400">P1 (X, Y)</span>
+                                    <span className="sublabel text-slate-500 dark:text-slate-400">P1 (X, Y)</span>
                                     <div className="flex gap-1">
                                         <input
                                             type="number"
@@ -469,7 +479,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 next[i] = { ...next[i], x1: Number(e.target.value) };
                                                 onUpdateLineLoads(next);
                                             }}
-                                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
+                                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
                                         />
                                         <input
                                             type="number"
@@ -479,12 +489,12 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 next[i] = { ...next[i], y1: Number(e.target.value) };
                                                 onUpdateLineLoads(next);
                                             }}
-                                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
+                                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
                                         />
                                     </div>
                                 </div>
                                 <div className="flex flex-col gap-1 text-[10px]">
-                                    <span className="sublabel text-slate-400">P2 (X, Y)</span>
+                                    <span className="sublabel text-slate-500 dark:text-slate-400">P2 (X, Y)</span>
                                     <div className="flex gap-1">
                                         <input
                                             type="number"
@@ -494,7 +504,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 next[i] = { ...next[i], x2: Number(e.target.value) };
                                                 onUpdateLineLoads(next);
                                             }}
-                                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
+                                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
                                         />
                                         <input
                                             type="number"
@@ -504,7 +514,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 next[i] = { ...next[i], y2: Number(e.target.value) };
                                                 onUpdateLineLoads(next);
                                             }}
-                                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
+                                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
                                         />
                                     </div>
                                 </div>
@@ -518,7 +528,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                             next[i] = { ...next[i], fx: Number(e.target.value) };
                                             onUpdateLineLoads(next);
                                         }}
-                                        className="bg-slate-900 border border-slate-700 text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
+                                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
                                     />
                                 </div>
                                 <div className="flex flex-col gap-1">
@@ -531,7 +541,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                             next[i] = { ...next[i], fy: Number(e.target.value) };
                                             onUpdateLineLoads(next);
                                         }}
-                                        className="bg-slate-900 border border-slate-700 text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
+                                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
                                     />
                                 </div>
                             </div>
