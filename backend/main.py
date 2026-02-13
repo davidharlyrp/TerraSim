@@ -55,7 +55,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "DaharTerraSim Backend API v 0.2.5.1 - Active"}
+    return {"message": "DaharTerraSim Backend API v 0.2.5 - Active"}
 
 @app.post("/api/mesh/generate", response_model=MeshResponse, tags=["mesh"])
 @limiter.limit("5/minute")
