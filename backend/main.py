@@ -10,7 +10,13 @@ from contextlib import asynccontextmanager
 from backend.models import MeshRequest, MeshResponse, SolverRequest, SolverResponse, SolverSettings, MeshResponse, BoundaryConditionsResponse, BoundaryCondition, PointLoadAssignment, ElementMaterial, Material
 from backend.mesh_generator import generate_mesh
 from backend.solver import solve_phases
+from backend.solver import solve_phases
 from backend.legacy_models import LegacySequentialRequest, LegacySequentialResponse, LegacyStageResult
+from backend.auth import verify_token, get_current_user, increment_usage_count
+from backend.limiter import limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from fastapi import Depends
 
 # Metadata
 TAGS_METADATA = [
@@ -35,6 +41,10 @@ app = FastAPI(
     openapi_tags=TAGS_METADATA
 )
 
+# Initialize Limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,15 +58,16 @@ async def root():
     return {"message": "DaharTerraSim Backend API v 0.2.5 - Active"}
 
 @app.post("/api/mesh/generate", response_model=MeshResponse, tags=["mesh"])
-async def create_mesh(request: MeshRequest):
+@limiter.limit("5/minute")
+async def create_mesh(mesh_req: MeshRequest, request: Request, user_payload: dict = Depends(verify_token)):
     """
     Generate a 2D triangular mesh based on provided polygons and settings.
     Runs in a thread pool to avoid blocking the event loop.
     """
-    print(f"Received mesh generation request with {len(request.polygons)} polygons")
+    print(f"Received mesh generation request with {len(mesh_req.polygons)} polygons")
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, generate_mesh, request)
+        response = await loop.run_in_executor(None, generate_mesh, mesh_req)
         if not response.success:
              return response
         return response
@@ -73,19 +84,31 @@ async def create_mesh(request: MeshRequest):
         )
 
 @app.post("/api/solver/calculate", tags=["solver"])
-async def run_solver(request: SolverRequest, raw_request: Request):
+@limiter.limit("5/minute")
+async def run_solver(solver_req: SolverRequest, request: Request, user_payload: dict = Depends(verify_token)):
     """
     Run Initial Phase FEA (Gravity Loading) using MStage load advancement.
     Returns a stream of progress logs and results.
     """
     print("Received streaming solver request.")
     
+    # Increment usage tracking (Asynchronous)
+    user_id = user_payload.get("id")
+    current_count = user_payload.get("terrasim_running_count", 0)
+    auth_header = request.headers.get("Authorization")
+    if auth_header and user_id:
+        try:
+            token = auth_header.split(" ")[1]
+            asyncio.create_task(increment_usage_count(user_id, current_count, token))
+        except Exception as e:
+            print(f"Error starting usage increment task: {e}")
+    
     async def event_generator():
         stop_flag = [False]
         
         async def monitor_disconnect():
             while not stop_flag[0]:
-                if await raw_request.is_disconnected():
+                if await request.is_disconnected():
                     print("Client disconnected, stopping solver...")
                     stop_flag[0] = True
                     break
@@ -96,7 +119,7 @@ async def run_solver(request: SolverRequest, raw_request: Request):
         try:
             loop = asyncio.get_event_loop()
             # Generator should check stop_flag via lambda
-            gen = solve_phases(request, should_stop=lambda: stop_flag[0])
+            gen = solve_phases(solver_req, should_stop=lambda: stop_flag[0])
             
             while True:
                 try:
@@ -121,7 +144,7 @@ async def run_solver(request: SolverRequest, raw_request: Request):
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 @app.post("/api/sequential/analyze", response_model=LegacySequentialResponse, tags=["legacy"])
-async def run_sequential_analysis(request: LegacySequentialRequest):
+async def run_sequential_analysis(request: LegacySequentialRequest, user_payload: dict = Depends(verify_token)):
     """
     Adapter endpoint for Front-end compatibility.
     Only supports 'Initial Stage' currently by mapping to solve_initial_phase.

@@ -25,9 +25,15 @@ class ErrorCode(str, Enum):
     NUM_NAN_DETECTED = "NUM_3002"
     SRM_LIMIT_REACHED = "SRM_3101"
     
+    # --- Authentication Errors (4000-4999) ---
+    AUTH_MISSING_TOKEN = "AUTH_4001"
+    AUTH_INVALID_TOKEN = "AUTH_4002"
+    AUTH_EXPIRED_TOKEN = "AUTH_4003"
+    
     # --- System & Resource Errors (9000-9999) ---
     SYS_OVERLOAD_PREVENTION = "SYS_9001"
     SYS_TIMEOUT = "SYS_9002"
+    SYS_RATE_LIMIT_EXCEEDED = "SYS_9003"
     SYS_INTERNAL_ERROR = "SYS_9999"
 
 ERROR_CATALOG: Dict[ErrorCode, Dict[str, str]] = {
@@ -94,6 +100,22 @@ ERROR_CATALOG: Dict[ErrorCode, Dict[str, str]] = {
     ErrorCode.SYS_OVERLOAD_PREVENTION: {
         "title": "Overload Prevention",
         "description": "Calculation blocked because the requested settings would likely exceed server safety or memory limits."
+    },
+    ErrorCode.AUTH_MISSING_TOKEN: {
+        "title": "Authentication Token Missing",
+        "description": "The request is missing the required 'Authorization: Bearer <token>' header."
+    },
+    ErrorCode.AUTH_INVALID_TOKEN: {
+        "title": "Invalid Authentication Token",
+        "description": "The provided token is invalid or malformed. Ensure you are using a valid JWT from PocketBase."
+    },
+    ErrorCode.AUTH_EXPIRED_TOKEN: {
+        "title": "Authentication Token Expired",
+        "description": "The provided token has expired. Please log in again to obtain a new token."
+    },
+    ErrorCode.SYS_RATE_LIMIT_EXCEEDED: {
+        "title": "Rate Limit Exceeded",
+        "description": "You have exceeded the allowed number of requests (5 per minute). Please wait a moment before trying again."
     }
 }
 

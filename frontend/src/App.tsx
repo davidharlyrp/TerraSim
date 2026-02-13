@@ -16,7 +16,7 @@ import { MeshSidebar } from './component/MeshSidebar';
 import { StagingSidebar } from './component/StagingSidebar';
 import { ResultSidebar } from './component/ResultSidebar';
 import { SAMPLE_MESH_REQUEST, SAMPLE_PHASES, SAMPLE_MATERIALS, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS } from './sample_data';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel } from './types';
 import { MaterialModal } from './component/MaterialModal';
 import { SettingsModal } from './component/SettingsModal';
@@ -26,11 +26,13 @@ import { APP_VERSION } from './version';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { pb } from './pb';
 import { AuthModal } from './component/AuthModal';
+import { AlertModal, AlertType } from './component/AlertModal';
+import { ConfirmModal } from './component/ConfirmModal';
 import { parseDXF } from './utils/dxfImport';
 import { PanelLeftClose } from 'lucide-react';
 
 function MainApp() {
-    const { isValid, incrementRunningCount, user } = useAuth();
+    const { isValid, user } = useAuth();
     // 0. Project State
     const [projectName, setProjectName] = useState("New Project");
     const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
@@ -65,7 +67,44 @@ function MainApp() {
     const [drawMode, setDrawMode] = useState<string | null>(null);
     const [selectedEntity, setSelectedEntity] = useState<{ type: string, id: string | number } | null>(null);
 
-    // 4. Handlers
+    // 4. Alert Modal State
+    const [alertConfig, setAlertConfig] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        type: AlertType;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        type: 'info'
+    });
+
+    const showAlert = (title: string, message: string, type: AlertType = 'info') => {
+        setAlertConfig({ isOpen: true, title, message, type });
+    };
+
+    // 5. Confirm Modal State
+    const [confirmConfig, setConfirmConfig] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => void;
+        isDestructive: boolean;
+        confirmText?: string;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        isDestructive: false
+    });
+
+    const showConfirm = (title: string, message: string, onConfirm: () => void, isDestructive: boolean = false, confirmText?: string) => {
+        setConfirmConfig({ isOpen: true, title, message, onConfirm, isDestructive, confirmText });
+    };
+
+    // 6. Handlers
     const handleImportDXF = async (file: File) => {
         try {
             const importedPolygons = await parseDXF(file);
@@ -76,13 +115,13 @@ function MainApp() {
                     materialId
                 }));
                 setPolygons([...polygons, ...polygonsWithMaterial]);
-                alert(`Successfully imported ${importedPolygons.length} polygons.`);
+                showAlert("Import Success", `Successfully imported ${importedPolygons.length} polygons.`, 'success');
             } else {
-                alert("No closed polygons or regions found in DXF.");
+                showAlert("Import Warning", "No closed polygons or regions found in DXF.", 'warning');
             }
         } catch (error) {
             console.error("Import failed:", error);
-            alert("Failed to import DXF file. See console for details.");
+            showAlert("Import Error", "Failed to import DXF file. See console for details.", 'error');
         }
     };
 
@@ -108,11 +147,15 @@ function MainApp() {
             if (result.success) {
                 setActiveTab(WizardTab.MESH);
             } else {
-                alert(`Mesh generation failed: ${result.error}`);
+                showAlert("Mesh Generation Failed", result.error || "Unknown error", 'error');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            alert("Failed to generate mesh.");
+            if (error instanceof ApiError) {
+                showAlert(error.title, error.description, 'error');
+            } else {
+                showAlert("Mesh Generation Error", error.message || "Unknown error", 'error');
+            }
         } finally {
             setIsGeneratingMesh(false);
         }
@@ -120,13 +163,12 @@ function MainApp() {
 
     const handleRunAnalysis = async () => {
         if (!meshResponse || !meshResponse.success) {
-            alert("Please generate mesh first!");
+            showAlert("Missing Data", "Please generate mesh first!", 'warning');
             setActiveTab(WizardTab.MESH);
             return;
         }
 
         setIsRunningAnalysis(true);
-        incrementRunningCount();
 
         const controller = new AbortController();
         setAbortController(controller);
@@ -144,7 +186,22 @@ function MainApp() {
             }, controller.signal);
 
             if (!response.ok) {
-                alert("Analysis failed to start.");
+                let errorTitle = "Analysis failed to start";
+                let errorDesc = "An unexpected error occurred.";
+
+                try {
+                    const errorData = await response.json();
+                    if (errorData && errorData.detail && typeof errorData.detail === 'object') {
+                        errorTitle = errorData.detail.title;
+                        errorDesc = errorData.detail.description;
+                    } else if (errorData && typeof errorData.detail === 'string') {
+                        errorDesc = errorData.detail;
+                    }
+                } catch (e) {
+                    errorDesc = response.statusText;
+                }
+
+                showAlert(errorTitle, errorDesc, 'error');
                 return;
             }
 
@@ -195,7 +252,7 @@ function MainApp() {
                 console.log("Analysis aborted.");
             } else {
                 console.error(error);
-                alert("Analysis failed.");
+                showAlert("Analysis Failed", "Analysis failed to complete.", 'error');
             }
         } finally {
             setIsRunningAnalysis(false);
@@ -244,7 +301,7 @@ function MainApp() {
             id: `line_load_${Date.now()}`,
             x1, y1, x2, y2,
             fx: 0,
-            fy: -50 // Default downward distributed load
+            fy: -10 // Default downward distributed load
         };
         setLineLoads([...lineLoads, newLoad]);
         setDrawMode(null);
@@ -289,11 +346,18 @@ function MainApp() {
     };
 
     const handleDeleteWaterLevel = (id: string) => {
-        if (confirm("Delete this water level?")) {
-            console.log(`Deleting water level ${id}`);
-            setWaterLevels(waterLevels.filter(wl => wl.id !== id));
-            if (selectedEntity?.type === 'water_level' && selectedEntity.id === id) setSelectedEntity(null);
-        }
+        showConfirm(
+            "Delete Water Level",
+            "Are you sure you want to delete this water level?",
+            () => {
+                console.log(`Deleting water level ${id}`);
+                setWaterLevels(waterLevels.filter(wl => wl.id !== id));
+                if (selectedEntity?.type === 'water_level' && selectedEntity.id === id) setSelectedEntity(null);
+                setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+            },
+            true,
+            "Delete"
+        );
     };
 
     const handleUpdateWaterLevel = (index: number, newWL: WaterLevel) => {
@@ -339,73 +403,47 @@ function MainApp() {
     };
 
     const handleLoadProject = (file: File) => {
-        if (!window.confirm("Loading a project will replace all current data. Are you sure?")) {
-            return;
-        }
+        showConfirm(
+            "Load Project",
+            "Loading a project will replace all current data. Are you sure you want to continue?",
+            () => {
+                setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const projectFile: ProjectFile = JSON.parse(e.target?.result as string);
+                        setMaterials(projectFile.materials || []);
+                        setPolygons(projectFile.polygons || []);
+                        setPointLoads(projectFile.pointLoads || []);
+                        setLineLoads(projectFile.lineLoads || []);
+                        setWaterLevels(projectFile.waterLevels || []);
+                        setPhases(projectFile.phases || []);
+                        setGeneralSettings(projectFile.generalSettings || SAMPLE_GENERAL_SETTINGS);
+                        setSolverSettings(projectFile.solverSettings || SAMPLE_SOLVER_SETTINGS);
+                        setMeshSettings(projectFile.meshSettings || SAMPLE_MESH_SETTINGS);
+                        setProjectName(projectFile.projectName || "Untitled Project");
+                        setCloudProjectId(null); // Reset cloud ID for local load
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const content = e.target?.result as string;
-                const projectData = JSON.parse(content) as ProjectFile;
-
-                // Validate basic structure (optional but good)
-                if (!projectData.version) throw new Error("Invalid project file");
-
-                // Batch update state
-                setProjectName(projectData.projectName || "Loaded Project");
-                setMaterials(projectData.materials || SAMPLE_MATERIALS);
-                setPolygons(projectData.polygons || []);
-                setPointLoads(projectData.pointLoads || []);
-                setLineLoads(projectData.lineLoads || []);
-
-                // Migration Logic for Water Levels
-                if (projectData.waterLevels) {
-                    setWaterLevels(projectData.waterLevels);
-                } else if (projectData.waterLevel && projectData.waterLevel.length > 0) {
-                    // Migrate old single water level to list
-                    setWaterLevels([{
-                        id: 'wl_legacy',
-                        name: 'Default Water Level',
-                        points: projectData.waterLevel
-                    }]);
-                } else {
-                    setWaterLevels([]);
-                }
-
-                setPhases(projectData.phases || SAMPLE_PHASES);
-                setGeneralSettings(projectData.generalSettings || SAMPLE_GENERAL_SETTINGS);
-                setSolverSettings(projectData.solverSettings || SAMPLE_SOLVER_SETTINGS);
-                if (projectData.meshSettings) setMeshSettings(projectData.meshSettings);
-
-                // Restore execution state
-                if (projectData.meshResponse && projectData.meshResponse.success) {
-                    setMeshResponse(projectData.meshResponse);
-                    if (projectData.solverResponse && projectData.solverResponse.success) {
-                        setSolverResponse(projectData.solverResponse);
-                        setActiveTab(WizardTab.RESULT);
-                    } else {
+                        // Switch to input tab after load
+                        // Explicitly clear results for a fresh start
+                        setMeshResponse(null);
                         setSolverResponse(null);
-                        setActiveTab(WizardTab.MESH);
-                    }
-                } else {
-                    setMeshResponse(null);
-                    setSolverResponse(null);
-                    setActiveTab(WizardTab.INPUT);
-                }
+                        setActiveTab(WizardTab.INPUT);
 
-                alert("Project loaded successfully!");
-            } catch (err) {
-                console.error("Failed to load project:", err);
-                alert("Failed to load project file. Invalid format.");
+                        showAlert("Project Load Success", "Project loaded successfully!", 'success');
+                    } catch (err) {
+                        console.error("Failed to load project:", err);
+                        showAlert("Project Load Error", "Failed to load project file. Invalid format.", 'error');
+                    }
+                };
+                reader.readAsText(file);
             }
-        };
-        reader.readAsText(file);
+        );
     };
 
     const handleCloudSave = async () => {
         if (!user) {
-            alert("Please login to save to cloud.");
+            showAlert("Login Required", "Please login to save to cloud.", 'warning');
             return;
         }
 
@@ -441,7 +479,7 @@ function MainApp() {
                     name: projectName,
                     data: projectData
                 });
-                alert("Project saved to cloud successfully!");
+                showAlert("Cloud Save Success", "Project saved to cloud successfully!", 'success');
             } else {
                 // Create new
                 const record = await pb.collection('terrasim_projects').create({
@@ -451,11 +489,11 @@ function MainApp() {
                     version: APP_VERSION
                 });
                 setCloudProjectId(record.id);
-                alert("Project created on cloud successfully!");
+                showAlert("Cloud Success", "Project created on cloud successfully!", 'success');
             }
         } catch (error) {
             console.error("Cloud save failed:", error);
-            alert("Failed to save project to cloud.");
+            showAlert("Cloud Save Error", "Failed to save project to cloud.", 'error');
         } finally {
             setIsCloudSaving(false);
         }
@@ -466,59 +504,34 @@ function MainApp() {
     };
 
     const handleLoadFromCloudData = (projectData: ProjectFile, recordId: string) => {
-        if (!window.confirm("Loading a project will replace all current data. Are you sure?")) {
-            return;
-        }
+        showConfirm(
+            "Load Cloud Project",
+            "Loading a project will replace all current data. Are you sure you want to continue?",
+            () => {
+                setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+                try {
+                    setMaterials(projectData.materials || []);
+                    setPolygons(projectData.polygons || []);
+                    setPointLoads(projectData.pointLoads || []);
+                    setLineLoads(projectData.lineLoads || []);
+                    setWaterLevels(projectData.waterLevels || []);
+                    setPhases(projectData.phases || []);
+                    setGeneralSettings(projectData.generalSettings || SAMPLE_GENERAL_SETTINGS);
+                    setSolverSettings(projectData.solverSettings || SAMPLE_SOLVER_SETTINGS);
+                    setMeshSettings(projectData.meshSettings || SAMPLE_MESH_SETTINGS);
+                    setProjectName(projectData.projectName || "Untitled Project");
+                    setCloudProjectId(recordId);
 
-        try {
-            // Batch update state
-            setProjectName(projectData.projectName || "Loaded Project");
-            setMaterials(projectData.materials || SAMPLE_MATERIALS);
-            setPolygons(projectData.polygons || []);
-            setPointLoads(projectData.pointLoads || []);
-            setLineLoads(projectData.lineLoads || []);
-
-            // Migration Logic for Water Levels
-            if (projectData.waterLevels) {
-                setWaterLevels(projectData.waterLevels);
-            } else if (projectData.waterLevel && projectData.waterLevel.length > 0) {
-                // Migrate old single water level to list
-                setWaterLevels([{
-                    id: 'wl_legacy',
-                    name: 'Default Water Level',
-                    points: projectData.waterLevel
-                }]);
-            } else {
-                setWaterLevels([]);
-            }
-
-            setPhases(projectData.phases || SAMPLE_PHASES);
-            setGeneralSettings(projectData.generalSettings || SAMPLE_GENERAL_SETTINGS);
-            setSolverSettings(projectData.solverSettings || SAMPLE_SOLVER_SETTINGS);
-            if (projectData.meshSettings) setMeshSettings(projectData.meshSettings);
-
-            // Restore execution state
-            if (projectData.meshResponse && projectData.meshResponse.success) {
-                setMeshResponse(projectData.meshResponse);
-                if (projectData.solverResponse && projectData.solverResponse.success) {
-                    setSolverResponse(projectData.solverResponse);
-                    setActiveTab(WizardTab.RESULT);
-                } else {
+                    // Explicitly clear results for a fresh start
+                    setMeshResponse(null);
                     setSolverResponse(null);
-                    setActiveTab(WizardTab.MESH);
+                    setActiveTab(WizardTab.INPUT);
+                } catch (err) {
+                    console.error("Failed to load project:", err);
+                    showAlert("Cloud Load Error", "Failed to load project data.", 'error');
                 }
-            } else {
-                setMeshResponse(null);
-                setSolverResponse(null);
-                setActiveTab(WizardTab.INPUT);
             }
-
-            setCloudProjectId(recordId);
-            // alert("Project loaded from cloud successfully!");
-        } catch (err) {
-            console.error("Failed to load project:", err);
-            alert("Failed to load project data.");
-        }
+        );
     };
 
     const handleToggleActive = (type: 'polygon' | 'load', id: string | number) => {
@@ -574,7 +587,7 @@ function MainApp() {
         if (!phase.material_overrides) phase.material_overrides = {};
 
         // If assigning same as original (hard to check cheaply without material lookup), just set it.
-        // Or if we want to "reset", we might need a separate action. 
+        // Or if we want to "reset", we might need a separate action.
         // For now, just set/overwrite.
         phase.material_overrides = { ...phase.material_overrides, [polyIdx]: matId };
 
@@ -926,6 +939,24 @@ function MainApp() {
                     onClose={() => setIsFeedbackModalOpen(false)}
                 />
             )}
+
+            <AlertModal
+                isOpen={alertConfig.isOpen}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                type={alertConfig.type}
+                onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+            />
+
+            <ConfirmModal
+                isOpen={confirmConfig.isOpen}
+                title={confirmConfig.title}
+                message={confirmConfig.message}
+                isDestructive={confirmConfig.isDestructive}
+                confirmText={confirmConfig.confirmText}
+                onConfirm={confirmConfig.onConfirm}
+                onCancel={() => setConfirmConfig({ ...confirmConfig, isOpen: false })}
+            />
 
             <div className="md:block hidden fixed bottom-3 right-3 z-[100] items-center justify-center flex flex-col dark:bg-slate-900/90 bg-slate-100/90 backdrop-blur-md py-2 px-4 rounded-xl border dark:border-slate-700 border-slate-200 shadow-2xl text-slate-400 z-[20]">
                 <div className="text-[10px] text-center">TerraSim v{APP_VERSION} (Beta) | Copyright © 2026</div>

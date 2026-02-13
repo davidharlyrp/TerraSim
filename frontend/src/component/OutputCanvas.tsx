@@ -568,6 +568,8 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
     const [showNodes, setShowNodes] = useState(false);
     const [showGaussPoints, setShowGaussPoints] = useState(false);
     const [showLog, setShowLog] = useState(false);
+    const [showLogOnDesktop, setShowLogOnDesktop] = useState(true);
+
 
     useEffect(() => {
         if (outputType === OutputType.YIELD_STATUS) {
@@ -603,7 +605,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
     return (
         <div className={`w-full h-full ${backgroundColor} absolute inset-0 overflow-hidden`}>
             {showControls && (
-                <div className="absolute top-4 md:bottom-4 left-10 right-4 z-16 w-64 flex mx-auto md:mx-0 flex-col gap-4">
+                <div className="absolute top-4 left-10 right-4 z-16 w-64 flex mx-auto md:mx-0 flex-col gap-4">
                     {/* Control Panel */}
                     <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md md:p-5 p-2 px-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xl md:space-y-4 space-y-2 shrink-0">
                         <div>
@@ -711,18 +713,27 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 
                     {/* Log Panel */}
                     {!isMobile && solverResult && solverResult.log && (
-                        <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md flex flex-col rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-y-hidden h-[200px] flex-1">
-                            <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
+                        <div className="bg-white/70 dark:bg-slate-900/90 backdrop-blur-md flex flex-col rounded-xl max-h-[600px] border border-slate-200 dark:border-slate-700 shadow-2xl overflow-y-hidden flex-1">
+                            <div className="flex justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
                                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-500 tracking-widest">Analysis Log Progress</label>
+                                <button
+                                    onClick={() => setShowLogOnDesktop(!showLogOnDesktop)}
+                                    className="cursor-pointer text-[10px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+                                    title="Toggle Log"
+                                >
+                                    <ChevronDown className={showLogOnDesktop ? 'rotate-180 w-4 h-4' : 'w-4 h-4'} />
+                                </button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-5 font-mono text-[9px] text-slate-600 dark:text-slate-400 custom-scrollbar space-y-1">
-                                {solverResult.log.map((line, i) => (
-                                    <div key={i} className="leading-relaxed border-b border-slate-200 dark:border-slate-800/50 pb-1 last:border-0 hover:text-slate-900 dark:hover:text-slate-200 transition-colors">
-                                        {line}
-                                    </div>
-                                ))}
-                                <div ref={logEndRef} />
-                            </div>
+                            {showLogOnDesktop && solverResult && solverResult.log && (
+                                <div className="flex-1 overflow-y-auto p-5 font-mono text-[9px] text-slate-600 dark:text-slate-400 custom-scrollbar space-y-1 ">
+                                    {solverResult.log.map((line, i) => (
+                                        <div key={i} className="leading-relaxed border-b border-slate-200 dark:border-slate-800/50 pb-1 last:border-0 hover:text-slate-900 dark:hover:text-slate-200 transition-colors">
+                                            {line}
+                                        </div>
+                                    ))}
+                                    <div ref={logEndRef} />
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

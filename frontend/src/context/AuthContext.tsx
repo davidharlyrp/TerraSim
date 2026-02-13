@@ -7,7 +7,6 @@ interface AuthContextType {
     isValid: boolean;
     loginWithGoogle: () => Promise<void>;
     logout: () => void;
-    incrementRunningCount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -36,20 +35,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         pb.authStore.clear();
     };
 
-    const incrementRunningCount = async () => {
-        if (!user) return;
-        try {
-            const currentCount = user.terrasim_running_count || 0;
-            await pb.collection('users').update(user.id, {
-                terrasim_running_count: currentCount + 1
-            });
-        } catch (error) {
-            console.error("Failed to increment count", error);
-        }
-    };
-
     return (
-        <AuthContext.Provider value={{ user, isValid, loginWithGoogle, logout, incrementRunningCount }}>
+        <AuthContext.Provider value={{ user, isValid, loginWithGoogle, logout }}>
             {children}
         </AuthContext.Provider>
     );

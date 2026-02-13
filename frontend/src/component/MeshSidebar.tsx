@@ -21,7 +21,7 @@ export const MeshSidebar: React.FC<MeshSidebarProps> = ({
             <div className="label2">Mesh Options</div>
 
             {/* Global Mesh Settings */}
-            <div className="p-4">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                         <label className="itemlabel">Mesh Size (m)</label>
@@ -61,7 +61,7 @@ export const MeshSidebar: React.FC<MeshSidebarProps> = ({
             </div>
 
             {mesh && mesh.success && (
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-900">
                     <div className="label2">Summary</div>
                     <div className="p-4 py-2 text-xs grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-900">
                         <div className="text-slate-600 dark:text-slate-400">Nodes:</div>

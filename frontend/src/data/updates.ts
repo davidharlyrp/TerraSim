@@ -11,6 +11,7 @@ export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
         changes: [
             "add dark/light theme mode",
             "UI Updates",
+            "rate limit",
             "bug fixes",
         ]
     },
