@@ -31,7 +31,7 @@ export const MeshSidebar: React.FC<MeshSidebarProps> = ({
                             max="50.0"
                             step="0.1"
                             value={meshSettings.mesh_size}
-                            onChange={(e) => onSettingsChange({ ...meshSettings, mesh_size: parseFloat(e.target.value) || 0.1 })}
+                            onChange={(e) => { onSettingsChange({ ...meshSettings, mesh_size: parseFloat(e.target.value) || 0.1 }) }}
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-xs p-2 rounded outline-none focus:border-blue-500 transition-colors"
                         />
                     </div>

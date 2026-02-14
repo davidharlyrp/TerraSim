@@ -67,7 +67,7 @@ ERROR_CATALOG: Dict[ErrorCode, Dict[str, str]] = {
     },
     ErrorCode.VAL_OVER_ELEMENT_LIMIT: {
         "title": "Element Count Exceeds Limit",
-        "description": "The mesh contains more than 4000 elements. This exceeds the maximum allowed element count for performance reasons."
+        "description": "The mesh contains more than 5000 elements. This exceeds the maximum allowed element count for performance reasons."
     },
     ErrorCode.SOLVER_DIVERGED: {
         "title": "Convergence Failure (Divergence)",

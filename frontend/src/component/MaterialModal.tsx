@@ -64,8 +64,9 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                     <option value={MaterialModel.LINEAR_ELASTIC}>Linear Elastic</option>
                                     <option value={MaterialModel.MOHR_COULOMB}>Mohr Coulomb</option>
                                     <option disabled title="Under development">Hardening Soil</option>
-                                    <option disabled title="Under development">Soft Soil</option>
-                                    <option disabled title="Under development">Modified Cam Clay</option>
+                                    {/* <option disabled title="Under development">Soft Soil</option> */}
+                                    <option disabled title="Under development">Cam Clay</option>
+                                    <option disabled title="Under development">Hoek-Brown</option>
                                 </select>
                             </div>
 

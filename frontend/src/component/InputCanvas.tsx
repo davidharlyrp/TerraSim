@@ -34,7 +34,7 @@ interface InputCanvasProps {
     activeTab?: WizardTab;
     currentPhaseType?: PhaseType;
     generalSettings: GeneralSettings;
-    materialOverrides?: Record<number, string>; // NEW
+    currentMaterial?: Record<number, string>; // polygon_index -> material_id from phase
     onOverrideMaterial?: (polyIdx: number, matId: string) => void; // NEW
 }
 
@@ -387,7 +387,7 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
     activeTab,
     currentPhaseType,
     generalSettings,
-    materialOverrides,
+    currentMaterial,
     onOverrideMaterial
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -485,7 +485,7 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                 {polygons.map((poly, i) => {
                     const isSelected = selectedEntity?.type === 'polygon' && selectedEntity.id === i;
                     const isActive = activePolygonIndices ? activePolygonIndices.includes(i) : true;
-                    const overrideId = activeTab === WizardTab.STAGING && materialOverrides ? materialOverrides[i] : undefined;
+                    const overrideId = activeTab === WizardTab.STAGING && currentMaterial ? currentMaterial[i] : undefined;
                     return (
                         <Polygon
                             key={i}

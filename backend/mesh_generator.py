@@ -18,16 +18,25 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
         all_segments = []
         regions = [] # [x, y, attribute, max_area]
         
-        # To deduplicate vertices, we use a map: (x, y) -> index
-        vertex_map: Dict[Tuple[float, float], int] = {}
+        # To deduplicate vertices, we use a map and distance check
+        # Previously used round(x,6) which is too strict for manual inputs.
+        # Now using linear search with tolerance 1e-3 (1mm).
+        # For typical boundary node counts (<1000), this is fast enough.
+        vertex_indices: List[Tuple[float, float, int]] = [] 
+        TOLERANCE = 1e-3 
         
         def get_vertex_index(x, y):
-            # Round to avoid precision issues
-            pt = (round(x, 6), round(y, 6))
-            if pt not in vertex_map:
-                vertex_map[pt] = len(all_vertices)
-                all_vertices.append([pt[0], pt[1]])
-            return vertex_map[pt]
+            # Check existing vertices
+            for vx, vy, v_idx in vertex_indices:
+                dist_sq = (x - vx)**2 + (y - vy)**2
+                if dist_sq < TOLERANCE**2:
+                    return v_idx
+            
+            # New vertex
+            new_idx = len(all_vertices)
+            all_vertices.append([x, y])
+            vertex_indices.append((x, y, new_idx))
+            return new_idx
 
         # Process each polygon
         material_id_map = {m.id: i for i, m in enumerate(request.materials)}

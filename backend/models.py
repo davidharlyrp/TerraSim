@@ -87,7 +87,7 @@ class MeshRequest(BaseModel):
     pointLoads: List[PointLoad]
     lineLoads: Optional[List[LineLoad]] = []
     mesh_settings: Optional[MeshSettings] = MeshSettings()
-    water_level: Optional[List[Point]] = None # Deprecated, keep for compat
+    # water_level removed. Use water_levels.
     water_levels: Optional[List[WaterLevel]] = [] # NEW
 
 class BoundaryCondition(BaseModel):
@@ -148,14 +148,15 @@ class PhaseRequest(BaseModel):
     active_polygon_indices: List[int] # Indices of polygons in original MeshRequest
     active_load_ids: List[str] # IDs of point/line loads to activate
     reset_displacements: bool = False # If true, reset total displacement visualization
-    material_overrides: Optional[Dict[int, str]] = None # Map polygon_index -> material_id
+    current_material: Dict[int, str] = {} # Map polygon_index -> material_id (full state for this phase)
+    parent_material: Dict[int, str] = {} # Map polygon_index -> material_id (inherited from parent)
     active_water_level_id: Optional[str] = None # NEW
 
 class SolverRequest(BaseModel):
     mesh: MeshResponse
     phases: List[PhaseRequest] # Sequence of phases
     settings: Optional[SolverSettings] = SolverSettings()
-    water_level: Optional[List[Point]] = None
+    # water_level removed. Use water_levels + active_water_level_id
     water_levels: Optional[List[WaterLevel]] = [] # NEW
     point_loads: Optional[List[PointLoad]] = [] # Definitions of load vectors
     line_loads: Optional[List[LineLoad]] = []

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Info, AlertTriangle, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, AlertTriangle, AlertCircle } from 'lucide-react';
 
 export type AlertType = 'info' | 'warning' | 'error' | 'success';
 
@@ -24,8 +24,6 @@ export const AlertModal: React.FC<AlertModalProps> = ({
         switch (type) {
             case 'warning': return <AlertTriangle className="w-6 h-6 text-amber-500" />;
             case 'error': return <AlertCircle className="w-6 h-6 text-rose-500" />;
-            case 'success': return <CheckCircle className="w-6 h-6 text-emerald-500" />;
-            default: return <Info className="w-6 h-6 text-blue-500" />;
         }
     };
 
@@ -33,8 +31,6 @@ export const AlertModal: React.FC<AlertModalProps> = ({
         switch (type) {
             case 'warning': return 'border-amber-500/50';
             case 'error': return 'border-rose-500/50';
-            case 'success': return 'border-emerald-500/50';
-            default: return 'border-blue-500/50';
         }
     };
 
@@ -46,9 +42,11 @@ export const AlertModal: React.FC<AlertModalProps> = ({
             >
                 <div className="p-6">
                     <div className="flex items-start gap-4">
-                        <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 flex-shrink-0">
-                            {getIcon()}
-                        </div>
+                        {type !== 'success' && (
+                            <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 flex-shrink-0">
+                                {getIcon()}
+                            </div>
+                        )}
                         <div className="flex-1 min-w-0">
                             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 truncate">
                                 {title}
@@ -69,7 +67,7 @@ export const AlertModal: React.FC<AlertModalProps> = ({
                 <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 flex justify-end">
                     <button
                         onClick={onClose}
-                        className="px-6 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold rounded-xl hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500"
+                        className="cursor-pointer px-6 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold rounded-xl hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500"
                     >
                         OK
                     </button>

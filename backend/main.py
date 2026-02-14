@@ -37,7 +37,7 @@ TAGS_METADATA = [
 app = FastAPI(
     title="DaharTerraSim Backend",
     description="Geotechnical Analysis Backend using CST FEA 2D",
-    version="0.2.5",
+    version="0.2.6",
     openapi_tags=TAGS_METADATA
 )
 
@@ -55,7 +55,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "DaharTerraSim Backend API v 0.2.5 - Active"}
+    return {"message": "DaharTerraSim Backend API v 0.2.6 - Active"}
 
 @app.post("/api/mesh/generate", response_model=MeshResponse, tags=["mesh"])
 @limiter.limit("5/minute")

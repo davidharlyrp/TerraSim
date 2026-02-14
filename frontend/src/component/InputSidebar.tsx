@@ -1,7 +1,8 @@
 import { PolygonData, Material, PointLoad, LineLoad, WaterLevel } from '../types';
 import { ChevronDown, Pencil, Trash, ChevronRight, Plus } from 'lucide-react';
 import { MathRender } from './Math';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import React from 'react';
 
 interface InputSidebarProps {
     materials: Material[];
@@ -25,6 +26,44 @@ interface InputSidebarProps {
     selectedEntity: { type: string, id: string | number } | null;
     onSelectEntity: (selection: { type: string, id: string | number } | null) => void;
 }
+
+const NumericInput: React.FC<{
+    value: number;
+    onChange: (v: number) => void;
+    className?: string;
+}> = ({ value, onChange, className }) => {
+    const [localValue, setLocalValue] = useState(value.toString());
+
+    useEffect(() => {
+        if (parseFloat(localValue) !== value && localValue !== '-' && localValue !== '.') {
+            setLocalValue(value.toString());
+        }
+    }, [value]);
+
+    return (
+        <input
+            type="text"
+            className={className}
+            value={localValue}
+            onChange={(e) => {
+                const val = e.target.value;
+                if (val === '' || val === '-' || val === '.' || val === '-.' || /^-?\d*\.?\d*$/.test(val)) {
+                    setLocalValue(val);
+                    const n = parseFloat(val);
+                    if (!isNaN(n)) {
+                        onChange(n);
+                    } else {
+                        onChange(0);
+                    }
+                }
+            }}
+            onBlur={() => {
+                // Ensure valid number on blur
+                setLocalValue(value.toString());
+            }}
+        />
+    );
+};
 
 export const InputSidebar: React.FC<InputSidebarProps> = ({
     materials,
@@ -251,11 +290,10 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 x :
                                             </div>
                                             <div className="">
-                                                <input
+                                                <NumericInput
                                                     key={j}
-                                                    type="number"
                                                     value={v.x}
-                                                    onChange={(e) => handleUpdatePolygonPoint(i, j, 'x', Number(e.target.value))}
+                                                    onChange={(val) => handleUpdatePolygonPoint(i, j, 'x', val)}
                                                     className="cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500"
                                                 />
                                             </div>
@@ -263,11 +301,10 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                                 y :
                                             </div>
                                             <div className="">
-                                                <input
+                                                <NumericInput
                                                     key={j}
-                                                    type="number"
                                                     value={v.y}
-                                                    onChange={(e) => handleUpdatePolygonPoint(i, j, 'y', Number(e.target.value))}
+                                                    onChange={(val) => handleUpdatePolygonPoint(i, j, 'y', val)}
                                                     className="cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500"
                                                 />
                                             </div>
@@ -325,16 +362,14 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                     </div>
                                     {wl.points.map((pt, ptIdx) => (
                                         <div key={ptIdx} className="flex gap-1 items-center">
-                                            <input
-                                                type="number"
+                                            <NumericInput
                                                 value={pt.x}
-                                                onChange={(e) => handleUpdateWaterPoint(i, ptIdx, 'x', Number(e.target.value))}
+                                                onChange={(val) => handleUpdateWaterPoint(i, ptIdx, 'x', val)}
                                                 className="w-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[10px] px-1 py-0.5 rounded focus:border-blue-500 outline-none"
                                             />
-                                            <input
-                                                type="number"
+                                            <NumericInput
                                                 value={pt.y}
-                                                onChange={(e) => handleUpdateWaterPoint(i, ptIdx, 'y', Number(e.target.value))}
+                                                onChange={(val) => handleUpdateWaterPoint(i, ptIdx, 'y', val)}
                                                 className="w-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[10px] px-1 py-0.5 rounded focus:border-blue-500 outline-none"
                                             />
                                             <button
@@ -386,12 +421,11 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                             <div className="grid grid-cols-2 gap-2">
                                 <div className="flex flex-col gap-1">
                                     <span className="sublabel">Coord X <MathRender tex="(m)" /></span>
-                                    <input
-                                        type="number"
+                                    <NumericInput
                                         value={load.x}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const next = [...pointLoads];
-                                            next[i] = { ...next[i], x: Number(e.target.value) };
+                                            next[i] = { ...next[i], x: val };
                                             onUpdateLoads(next);
                                         }}
                                         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
@@ -399,12 +433,11 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     <span className="sublabel">Coord Y <MathRender tex="(m)" /></span>
-                                    <input
-                                        type="number"
+                                    <NumericInput
                                         value={load.y}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const next = [...pointLoads];
-                                            next[i] = { ...next[i], y: Number(e.target.value) };
+                                            next[i] = { ...next[i], y: val };
                                             onUpdateLoads(next);
                                         }}
                                         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
@@ -412,12 +445,11 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     <span className="sublabel">Force Fx <MathRender tex="(kN)" /></span>
-                                    <input
-                                        type="number"
+                                    <NumericInput
                                         value={load.fx}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const next = [...pointLoads];
-                                            next[i] = { ...next[i], fx: Number(e.target.value) };
+                                            next[i] = { ...next[i], fx: val };
                                             onUpdateLoads(next);
                                         }}
                                         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
@@ -425,12 +457,11 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     <span className="sublabel">Force Fy <MathRender tex="(kN)" /></span>
-                                    <input
-                                        type="number"
+                                    <NumericInput
                                         value={load.fy}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const next = [...pointLoads];
-                                            next[i] = { ...next[i], fy: Number(e.target.value) };
+                                            next[i] = { ...next[i], fy: val };
                                             onUpdateLoads(next);
                                         }}
                                         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
@@ -471,22 +502,20 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 <div className="flex flex-col gap-1 text-[10px]">
                                     <span className="sublabel text-slate-500 dark:text-slate-400">P1 (X, Y)</span>
                                     <div className="flex gap-1">
-                                        <input
-                                            type="number"
+                                        <NumericInput
                                             value={load.x1}
-                                            onChange={(e) => {
+                                            onChange={(val) => {
                                                 const next = [...lineLoads];
-                                                next[i] = { ...next[i], x1: Number(e.target.value) };
+                                                next[i] = { ...next[i], x1: val };
                                                 onUpdateLineLoads(next);
                                             }}
                                             className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
                                         />
-                                        <input
-                                            type="number"
+                                        <NumericInput
                                             value={load.y1}
-                                            onChange={(e) => {
+                                            onChange={(val) => {
                                                 const next = [...lineLoads];
-                                                next[i] = { ...next[i], y1: Number(e.target.value) };
+                                                next[i] = { ...next[i], y1: val };
                                                 onUpdateLineLoads(next);
                                             }}
                                             className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
@@ -496,22 +525,20 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 <div className="flex flex-col gap-1 text-[10px]">
                                     <span className="sublabel text-slate-500 dark:text-slate-400">P2 (X, Y)</span>
                                     <div className="flex gap-1">
-                                        <input
-                                            type="number"
+                                        <NumericInput
                                             value={load.x2}
-                                            onChange={(e) => {
+                                            onChange={(val) => {
                                                 const next = [...lineLoads];
-                                                next[i] = { ...next[i], x2: Number(e.target.value) };
+                                                next[i] = { ...next[i], x2: val };
                                                 onUpdateLineLoads(next);
                                             }}
                                             className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
                                         />
-                                        <input
-                                            type="number"
+                                        <NumericInput
                                             value={load.y2}
-                                            onChange={(e) => {
+                                            onChange={(val) => {
                                                 const next = [...lineLoads];
-                                                next[i] = { ...next[i], y2: Number(e.target.value) };
+                                                next[i] = { ...next[i], y2: val };
                                                 onUpdateLineLoads(next);
                                             }}
                                             className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 px-1 py-0.5 rounded outline-none focus:border-blue-500"
@@ -520,12 +547,11 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     <span className="sublabel">Force X <MathRender tex="(kN/m)" /></span>
-                                    <input
-                                        type="number"
+                                    <NumericInput
                                         value={load.fx}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const next = [...lineLoads];
-                                            next[i] = { ...next[i], fx: Number(e.target.value) };
+                                            next[i] = { ...next[i], fx: val };
                                             onUpdateLineLoads(next);
                                         }}
                                         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"
@@ -533,12 +559,11 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     <span className="sublabel">Force Y <MathRender tex="(kN/m)" /></span>
-                                    <input
-                                        type="number"
+                                    <NumericInput
                                         value={load.fy}
-                                        onChange={(e) => {
+                                        onChange={(val) => {
                                             const next = [...lineLoads];
-                                            next[i] = { ...next[i], fy: Number(e.target.value) };
+                                            next[i] = { ...next[i], fy: val };
                                             onUpdateLineLoads(next);
                                         }}
                                         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-[10px] px-2 py-1 rounded outline-none focus:border-blue-500"

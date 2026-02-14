@@ -1,4 +1,4 @@
-import { Settings, LogOut, Bell, Calendar, ChevronRight, Save, FolderOpen, CloudUpload, CloudDownload, Loader2, Book, MessageSquare, Sun, Moon, X, ChevronDown, BookOpen } from 'lucide-react';
+import { Settings, LogOut, Bell, Calendar, ChevronRight, Save, FolderOpen, CloudUpload, CloudDownload, Loader2, Book, MessageSquare, Sun, Moon, X, ChevronDown, BookOpen, Plus, FileDown } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_VERSION } from '../version';
@@ -12,10 +12,13 @@ interface AppHeaderProps {
     onOpenSettings: () => void;
     onSaveProject: () => void;
     onLoadProject: (file: File) => void;
+    onOpenSampleGallery: () => void;
     onCloudSave: () => void;
     onCloudLoad: () => void;
     onOpenFeedback: () => void;
     isCloudSaving: boolean;
+    onNewProject: () => void;
+    onCloudSaveAsNew: () => void;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -24,15 +27,19 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     onOpenSettings,
     onSaveProject,
     onLoadProject,
+    onOpenSampleGallery,
     onCloudSave,
     onCloudLoad,
     onOpenFeedback,
-    isCloudSaving
+    isCloudSaving,
+    onNewProject,
+    onCloudSaveAsNew
 }) => {
     const { user, logout } = useAuth();
     const { theme, toggleTheme } = useTheme();
     const [isUpdateOpen, setIsUpdateOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const userPanelRef = useRef<HTMLDivElement>(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isUserPanelOpen, setIsUserPanelOpen] = useState(false);
     const isWindowSizeSmall = window.innerWidth < 768;
@@ -42,6 +49,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         const handleClickOutside = (event: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
                 setIsUpdateOpen(false);
+            }
+            if (userPanelRef.current && !userPanelRef.current.contains(event.target as Node)) {
+                setIsUserPanelOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -60,17 +70,23 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                         onMouseLeave={() => setAppNameShowed(false)}
                     />
                     <span className={`text-slate-600 text-lg font-bold dark:text-slate-200 transition ${isAppNameShowed ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'}`}>TerraSim</span>
-                    <div className={`flex items-center gap-2 transition ${!isAppNameShowed ? '-translate-x-20' : 'translate-x-0'}`}>
+                    <div className={`flex items-center gap-2 md:w-full w-55 transition ${!isAppNameShowed ? '-translate-x-20' : 'translate-x-0'}`}>
                         <div className="rotate-15 w-0.5 h-6 mx-2 bg-slate-300 dark:bg-slate-700" />
                         <input
                             type="text"
                             value={projectName}
                             onChange={(e) => setProjectName(e.target.value)}
-                            className="bg-transparent border-none md:text-sm md:w-80 w-60 text-xs font-semibold text-slate-600 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-1"
+                            className="bg-transparent border-0 hover:border-1 md:text-sm md:w-full w-60 text-xs font-semibold text-slate-600 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-1"
                             placeholder="Project Name"
 
                         />
                     </div>
+                </div>
+
+                <div className="hidden md:flex items-center justify-center w-[50%]">
+                    <span className='text-xs font-semibold text-slate-800 dark:text-slate-300'>
+                        TERRASIM <span className='text-[10px]'>v {APP_VERSION} BETA</span>
+                    </span>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 w-full">
@@ -82,6 +98,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                 title="Feedback & Bug Report"
                             >
                                 <MessageSquare className="w-5 h-5 transition-transform group-hover:scale-110" />
+                            </button>
+
+                            <button
+                                onClick={onOpenSampleGallery}
+                                className={`cursor-pointer p-2.5 rounded-xl transition-all group relative active:scale-95 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400`}
+                                title="Open Sample Project"
+                            >
+                                <FileDown className="w-5 h-5 transition-transform group-hover:scale-110" />
                             </button>
 
                             <button
@@ -153,11 +177,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                 )}
                             </button>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2" ref={userPanelRef}>
                                 <button
                                     onClick={() => setIsUserPanelOpen(!isUserPanelOpen)}
-                                    onMouseEnter={() => setIsUserPanelOpen(true)}
-                                    onMouseLeave={() => setIsUserPanelOpen(false)}
+                                    // Removed onMouseEnter/onMouseLeave to prevent closing when file dialog opens
                                     className="relative w-8 h-8 flex items-center justify-center rounded-full bg-blue-500/20 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-all text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 group relative active:scale-95"
                                     title="User Panel"
                                 >
@@ -170,7 +193,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                         </span>
                                     </span>
                                     {isUserPanelOpen && (
-                                        <div className="absolute top-full right-0 mt-2 w-60 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700">
+                                        <div
+                                            className="absolute top-full right-0 mt-2 w-60 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
                                             <div className="p-4">
                                                 <div className="flex items-center gap-2 mb-4 border-b border-slate-200 dark:border-slate-700 pb-4">
                                                     <div className="flex-1">
@@ -180,12 +206,23 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                                 </div>
                                                 <div className='flex flex-col gap-1 mb-4 border-b border-slate-200 dark:border-slate-700 pb-4'>
                                                     <button
+                                                        onClick={() => {
+                                                            setIsUserPanelOpen(false);
+                                                            onNewProject();
+                                                        }}
+                                                        className="cursor-pointer flex items-center text-left text-sm gap-2 p-2.5 rounded-xl transition-all group relative active:scale-95 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-900/20"
+                                                        title="Create New Project"
+                                                    >
+                                                        <FolderOpen className="w-5 h-5" />
+                                                        New Project
+                                                    </button>
+                                                    <button
                                                         onClick={onSaveProject}
                                                         className="cursor-pointer flex items-center text-left text-sm gap-2 p-2.5 rounded-xl transition-all group relative active:scale-95 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400"
-                                                        title="Save Project"
+                                                        title="Download Project"
                                                     >
                                                         <Save className="w-5 h-5" />
-                                                        Save Project
+                                                        Download Project
                                                     </button>
                                                     <button
                                                         onClick={onCloudSave}
@@ -199,6 +236,22 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                                             <CloudUpload className="w-5 h-5" />
                                                         )}
                                                         Save Project on Cloud
+                                                    </button>
+                                                    <button
+                                                        onClick={onCloudSaveAsNew}
+                                                        disabled={isCloudSaving}
+                                                        className="cursor-pointer flex items-center text-left text-sm gap-2 p-2.5 rounded-xl transition-all group relative active:scale-95 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        title="Save as New Project on Cloud"
+                                                    >
+                                                        {isCloudSaving ? (
+                                                            <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                                                        ) : (
+                                                            <div className="relative">
+                                                                <CloudUpload className="w-5 h-5" />
+                                                                <div className="absolute -bottom-1 -right-1 text-[8px] font-bold bg-blue-500 text-white px-1 rounded-full">+</div>
+                                                            </div>
+                                                        )}
+                                                        Save as New Project
                                                     </button>
                                                     <button
                                                         onClick={onCloudLoad}
@@ -314,10 +367,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                         </div>
                         <div className="flex flex-col items-center gap-2 px-3 py-2 w-full border-b border-slate-200 dark:border-slate-700">
                             <button
+                                onClick={onNewProject}
+                                className="buttonlabel">
+                                <Plus className="w-5 h-5 text-blue-600 dark:text-white" />
+                                <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">New Project</span>
+                            </button>
+                            <button
                                 onClick={onSaveProject}
                                 className="buttonlabel">
                                 <Save className="w-5 h-5 text-blue-600 dark:text-white" />
-                                <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">Save</span>
+                                <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">Download Project</span>
                             </button>
                             <button
                                 onClick={onCloudSave}
@@ -329,6 +388,19 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                     <CloudUpload className="w-5 h-5 text-blue-600 dark:text-white" />
                                 )}
                                 <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">Save to Cloud</span>
+                            </button>
+                            <button
+                                onClick={onCloudSaveAsNew}
+                                className="buttonlabel">
+                                {isCloudSaving ? (
+                                    <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                                ) : (
+                                    <div className="relative">
+                                        <CloudUpload className="w-5 h-5" />
+                                        <div className="absolute -bottom-1 -right-1 text-[8px] font-bold bg-blue-500 text-white px-1 rounded-full">+</div>
+                                    </div>
+                                )}
+                                <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">Save as New</span>
                             </button>
                             <button
                                 onClick={onCloudLoad}

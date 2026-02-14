@@ -221,7 +221,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         validation_errors.append(get_error_info(ErrorCode.VAL_MAX_STEPS_OOB))
     if (settings.min_desired_iterations or 0) > (settings.max_desired_iterations or 100):
          validation_errors.append(get_error_info(ErrorCode.VAL_ITER_MISMATCH))
-    if len(mesh.elements) > 10000:
+    if len(mesh.elements) > 5000:
         validation_errors.append(get_error_info(ErrorCode.VAL_OVER_ELEMENT_LIMIT))
 
     if validation_errors:
@@ -257,11 +257,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
         for wl in request.water_levels:
             water_levels_map[wl.id] = [{"x": p.x, "y": p.y} for p in wl.points]
     
-    # Fallback to legacy `water_level` if no `water_levels` or as a default "global" one
-    # If legacy `water_level` exists and no `water_levels` are defined, treat it as a default.
+    # Fallback/Default handling
     default_water_level = None
-    if request.water_level:
-        default_water_level = [{"x": p.x, "y": p.y} for p in request.water_level]
+    # Legacy `water_level` removed. If no water_levels defined, default is Dry (None).
     
     # Track current water level to detect changes
     current_water_level_data = default_water_level
@@ -318,11 +316,90 @@ def solve_phases(request: SolverRequest, should_stop=None):
     # Map node -> [fx, fy]
     active_point_loads = {} 
 
-    for phase_idx, phase in enumerate(request.phases):
+    # === STAGE 2: Topological Sort for Branching ===
+    # Sort phases by dependency order (parents before children)
+    phase_by_id = {p.id: p for p in request.phases}
+    sorted_phases = []
+    visited = set()
+    
+    def topo_visit(phase_id):
+        if phase_id in visited:
+            return
+        visited.add(phase_id)
+        ph = phase_by_id[phase_id]
+        if ph.parent_id and ph.parent_id in phase_by_id:
+            topo_visit(ph.parent_id)
+        sorted_phases.append(ph)
+    
+    for p in request.phases:
+        topo_visit(p.id)
+    
+    # State Snapshots: after each phase completes, save its full state
+    # so child phases can restore from the correct baseline
+    phase_snapshots = {}  # phase_id -> snapshot dict
+    failed_phases = set()  # Track failed phases so we can skip their children
+    
+    # Save initial state as the "no parent" baseline
+    import copy
+    initial_snapshot = {
+        'total_displacement': total_displacement.copy(),
+        'element_stress_state': copy.deepcopy(element_stress_state),
+        'element_strain_state': copy.deepcopy(element_strain_state),
+        'element_yield_state': copy.deepcopy(element_yield_state),
+        'element_pwp_excess_state': copy.deepcopy(element_pwp_excess_state),
+        'current_water_level_data': copy.deepcopy(current_water_level_data),
+        'current_water_level_id': current_water_level_id,
+        'elem_materials': {ep['id']: (ep['material'], ep['K'].copy(), ep['F_grav'].copy(), ep['D'].copy(), copy.deepcopy(ep['gauss_points'])) for ep in elem_props_all},
+    }
+
+    # Initialize tracking sets for debug
+    logged_zero_grav_polys = set()
+    logged_silent_skip_polys = set()
+
+    for phase_idx, phase in enumerate(sorted_phases):
         if should_stop and should_stop():
             log.append("Analysis cancelled by user.")
             yield {"type": "log", "content": "Analysis cancelled by user."}
             break
+        
+        # Skip children of failed phases
+        if phase.parent_id and phase.parent_id in failed_phases:
+            msg_skip = f"Skipping phase {phase.name} because parent phase failed."
+            log.append(msg_skip)
+            yield {"type": "log", "content": msg_skip}
+            failed_phases.add(phase.id)
+            continue
+        
+        # === RESTORE PARENT STATE ===
+        # Before processing each phase, restore the parent's saved state
+        if phase.parent_id and phase.parent_id in phase_snapshots:
+            snapshot = phase_snapshots[phase.parent_id]
+            total_displacement = snapshot['total_displacement'].copy()
+            element_stress_state = copy.deepcopy(snapshot['element_stress_state'])
+            element_strain_state = copy.deepcopy(snapshot['element_strain_state'])
+            element_yield_state = copy.deepcopy(snapshot['element_yield_state'])
+            element_pwp_excess_state = copy.deepcopy(snapshot['element_pwp_excess_state'])
+            current_water_level_data = copy.deepcopy(snapshot['current_water_level_data'])
+            current_water_level_id = snapshot['current_water_level_id']
+            # Restore element materials from snapshot
+            for ep in elem_props_all:
+                eid = ep['id']
+                if eid in snapshot['elem_materials']:
+                    mat, K, F_grav, D, gps = snapshot['elem_materials'][eid]
+                    ep['material'] = mat
+                    ep['K'] = K.copy()
+                    ep['F_grav'] = F_grav.copy()
+                    ep['D'] = D.copy()
+                    ep['gauss_points'] = copy.deepcopy(gps)
+        elif not phase.parent_id:
+            # First phase (no parent) — use initial state
+            total_displacement = initial_snapshot['total_displacement'].copy()
+            element_stress_state = copy.deepcopy(initial_snapshot['element_stress_state'])
+            element_strain_state = copy.deepcopy(initial_snapshot['element_strain_state'])
+            element_yield_state = copy.deepcopy(initial_snapshot['element_yield_state'])
+            element_pwp_excess_state = copy.deepcopy(initial_snapshot['element_pwp_excess_state'])
+            current_water_level_data = copy.deepcopy(initial_snapshot['current_water_level_data'])
+            current_water_level_id = initial_snapshot['current_water_level_id']
 
         msg_start = f"--- Starting Phase: {phase.name} ({phase.id}) [Type: {phase.phase_type or 'plastic'}] ---"
         log.append(msg_start)
@@ -364,41 +441,96 @@ def solve_phases(request: SolverRequest, should_stop=None):
              current_water_level_data = phase_water_level_data
              current_water_level_id = phase_water_level_id
 
-        # 0. RESET MATERIAL STATE (Fix for persistence bug)
-        # For non-Safety Analysis phases, revert elements to their original material first.
+        # 0. MATERIAL DIFF: Compare current_material vs parent_material
+        # For each polygon where material changed, rebuild element matrices.
+        # Also compute incremental gravity load from unit weight difference.
+        delta_F_grav_material = np.zeros(num_dof) # Incremental gravity from material changes
+        material_map = {m.id: m for m in request.materials}
+        
         if phase.phase_type != PhaseType.SAFETY_ANALYSIS:
-            reset_count = 0
+            material_change_count = 0
+            
+            # Build maps: current_material and parent_material
+            current_mat_map = phase.current_material or {}
+            parent_mat_map = phase.parent_material or {}
+            
+            # Find all polygon indices that need material updates
+            changed_polygons = {}  # poly_idx -> (new_mat, old_mat_id)
+            
+            for poly_idx_str, mat_id in current_mat_map.items():
+                poly_idx = int(poly_idx_str)
+                parent_mat_id = parent_mat_map.get(str(poly_idx)) or parent_mat_map.get(poly_idx)
+                
+                # Determine if this polygon's material changed from parent
+                if parent_mat_id and str(mat_id) != str(parent_mat_id):
+                    new_mat = material_map.get(mat_id)
+                    if new_mat:
+                        changed_polygons[poly_idx] = (new_mat, parent_mat_id)
+            
+            # Also check if water level changed (need to update all elements regardless)
             for ep in elem_props_all:
-                # Condition to recompute: 
-                # 1. Material differs from original (revert override)
-                # 2. OR Water Level changed (need to update Density & PWP)
-                # Note: valid check: `ep['material'].id != ep['original_material'].id` covers material overrides.
-                # But if water level changed, we MUST recompute even if material is same.
+                poly_idx = ep['polygon_id']
+                poly_idx_str = str(poly_idx)
                 
                 needs_update = False
-                target_mat = ep['original_material']
+                target_mat = ep['material']  # Default: keep current material
+                old_mat = ep['material']
                 
-                if ep['material'].id != target_mat.id:
+                # Check if this polygon has a material change from the diff
+                if poly_idx in changed_polygons:
+                    new_mat, old_mat_id = changed_polygons[poly_idx]
+                    target_mat = new_mat
                     needs_update = True
+                elif water_level_changed:
+                    # Water level changed but material didn't — still need to recompute
+                    # Use the current_material for this polygon to ensure right material
+                    cur_mat_id = current_mat_map.get(poly_idx_str) or current_mat_map.get(poly_idx)
+                    if cur_mat_id:
+                        resolved_mat = material_map.get(str(cur_mat_id))
+                        if resolved_mat:
+                            target_mat = resolved_mat
+                    needs_update = True
+                else:
+                    # Ensure element material matches current_material map (for first phase / state consistency)
+                    cur_mat_id = current_mat_map.get(poly_idx_str) or current_mat_map.get(poly_idx)
+                    if cur_mat_id and str(ep['material'].id) != str(cur_mat_id):
+                        resolved_mat = material_map.get(str(cur_mat_id))
+                        if resolved_mat:
+                            target_mat = resolved_mat
+                            needs_update = True
                 
-                if water_level_changed:
-                    needs_update = True
-
                 if needs_update:
                     coords = np.array([nodes[n] for n in ep['nodes']])
-                    K_el, F_grav, gauss_point_data, D = compute_element_matrices_t6(coords, target_mat, water_level=current_water_level_data)
+                    
+                    # Store old gravity force before recomputing
+                    old_F_grav = ep['F_grav'].copy() if ep['F_grav'] is not None else np.zeros(12)
+                    
+                    K_el, F_grav, gauss_point_data, D = compute_element_matrices_t6(
+                        coords, target_mat, water_level=current_water_level_data
+                    )
                     
                     if K_el is not None:
+                        # Compute incremental gravity from material change (unit weight diff)
+                        if poly_idx in changed_polygons:
+                            delta_F_grav_el = F_grav - old_F_grav
+                            # Map element local DOFs to global DOFs
+                            for local_idx, node_id in enumerate(ep['nodes']):
+                                global_dof_x = node_id * 2
+                                global_dof_y = node_id * 2 + 1
+                                delta_F_grav_material[global_dof_x] += delta_F_grav_el[local_idx * 2]
+                                delta_F_grav_material[global_dof_y] += delta_F_grav_el[local_idx * 2 + 1]
+                        
                         ep['K'] = K_el
                         ep['F_grav'] = F_grav
                         ep['D'] = D
                         ep['material'] = target_mat
                         ep['gauss_points'] = gauss_point_data
-                        reset_count += 1
-            if reset_count > 0:
-                msg_reset = f"Updated {reset_count} elements (Material Reset / Water Level Update)."
-                log.append(msg_reset)
-                yield {"type": "log", "content": msg_reset}
+                        material_change_count += 1
+            
+            if material_change_count > 0:
+                msg_mat = f"Updated {material_change_count} elements (Material Diff / Water Level Update). Changed polygons: {list(changed_polygons.keys())}"
+                log.append(msg_mat)
+                yield {"type": "log", "content": msg_mat}
         
         # 1. Identify Active/Inactive Elements
         active_elem_props = [ep for ep in elem_props_all if ep['polygon_id'] in phase.active_polygon_indices]
@@ -409,55 +541,6 @@ def solve_phases(request: SolverRequest, should_stop=None):
         for ep in active_elem_props:
             for n_idx in ep['nodes']:
                 active_node_indices.add(n_idx)
-
-        # 2.5 Handle Material Overrides
-        if phase.material_overrides:
-            material_map = {m.id: m for m in request.materials}
-            overide_count = 0
-            for poly_idx_str, mat_id in phase.material_overrides.items():
-                poly_idx = int(poly_idx_str)
-                new_mat = material_map.get(mat_id)
-                
-                if not new_mat:
-                    log.append(f"WARNING: Material override ID {mat_id} for polygon {poly_idx} not found in request materials.")
-                    continue
-                
-                # Update all elements belonging to this polygon
-                affected_eps = [ep for ep in elem_props_all if ep['polygon_id'] == poly_idx]
-                
-                if not affected_eps:
-                    log.append(f"WARNING: No elements found for polygon index {poly_idx} to override.")
-                    continue
-                    
-                msg_override = f"Overriding material for Polygon {poly_idx}: New Material '{new_mat.name}' ({new_mat.id})"
-                log.append(msg_override)
-                yield {"type": "log", "content": msg_override}
-                print(msg_override)
-                
-                for ep in affected_eps:
-                    # Recompute Element Matrices with NEW material AND Current Water Level
-                    coords = np.array([nodes[n] for n in ep['nodes']])
-                    K_el, F_grav, gauss_point_data, D = compute_element_matrices_t6(coords, new_mat, water_level=current_water_level_data)
-                    
-                    if K_el is not None:
-                        ep['K'] = K_el
-                        ep['F_grav'] = F_grav
-                        ep['D'] = D
-                        ep['material'] = new_mat
-                        ep['gauss_points'] = gauss_point_data
-                        
-                        # Reset state for this element? 
-                        # Ideally, stresses should be carried over? 
-                        # If material changes (e.g. concrete hardening), stiffness changes, but existing stress remains?
-                        # Usually K0 or previous phase stress is valid.
-                        # But D matrix changes, so next increment will use new stiffness.
-                        # Yes, this is correct for "Staged Construction".
-                        
-                overide_count += 1
-            
-            if overide_count > 0:
-                # Re-select active_elem_props to ensure they have the updated pointers (they should already, as dicts are mutable)
-                active_elem_props = [ep for ep in elem_props_all if ep['polygon_id'] in phase.active_polygon_indices]
 
         # Handle K0 Procedure
         if phase.phase_type == PhaseType.K0_PROCEDURE:
@@ -543,6 +626,59 @@ def solve_phases(request: SolverRequest, should_stop=None):
         active_row_indices = np.array(rows, dtype=np.int32)
         active_col_indices = np.array(cols, dtype=np.int32)
 
+        
+        # === 3.5 Mesh Connectivity Check (Floating Element Detection) ===
+        # Ensure all active elements are connected to at least one fixed node (Dirichlet BC).
+        active_nodes_set = set(active_node_indices)
+        if not active_nodes_set:
+             # Look, no nodes! 
+             pass
+        else:
+            # Build adjacency graph
+            adj = {n: [] for n in active_nodes_set}
+            for ep in active_elem_props:
+                enodes = ep['nodes']
+                for i in range(6):
+                    u = enodes[i]
+                    for j in range(i+1, 6):
+                        v = enodes[j]
+                        if u in adj and v in adj:
+                            adj[u].append(v)
+                            adj[v].append(u)
+            
+            # Identify BC nodes
+            fixed_nodes = set()
+            for bc in mesh.boundary_conditions.full_fixed:
+                if bc.node in active_nodes_set: fixed_nodes.add(bc.node)
+            for bc in mesh.boundary_conditions.normal_fixed:
+                if bc.node in active_nodes_set: fixed_nodes.add(bc.node)
+                
+            # BFS from fixed nodes
+            visited_nodes = set(fixed_nodes)
+            import collections
+            q = collections.deque(fixed_nodes)
+            
+            while q:
+                u = q.popleft()
+                for v in adj[u]:
+                    if v not in visited_nodes:
+                        visited_nodes.add(v)
+                        q.append(v)
+            
+            # Check for unvisited active nodes
+            unvisited = active_nodes_set - visited_nodes
+            if unvisited:
+                floating_polys = set()
+                for ep in active_elem_props:
+                    if any(n in unvisited for n in ep['nodes']):
+                        floating_polys.add(ep['polygon_id'])
+                
+                msg = f"Phase '{phase.name}' FAILED: Floating elements detected in polygons {sorted(list(floating_polys))}. These elements are not connected to any boundary condition (mesh gap likely)."
+                log.append(msg)
+                yield {"type": "log", "content": msg}
+                failed_phases.add(phase.id)
+                continue
+
         # 4. Standard FEA Steps (Plastic, Gravity Loading, Consolidation, etc.)
         # Build initial stiffness (Linear Elastic)
         K_values = []
@@ -590,11 +726,31 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 for li in range(6):
                     gi = ep['nodes'][li]
                     delta_F_external[gi*2:gi*2+2] += ep['F_grav'][li*2:li*2+2]
+                    
+                # DEBUG: Check if gravity is non-zero
+                if np.linalg.norm(ep['F_grav']) < 1e-9:
+                     # Only log once per polygon to avoid spam
+                     if poly_id not in logged_zero_grav_polys:
+                         mat = ep['material']
+                         rho = mat.unitWeightUnsaturated
+                         log.append(f"WARNING: Polygon {poly_id} newly active but has ~0 gravity load. Mat: '{mat.name}', Rho: {rho}")
+                         logged_zero_grav_polys.add(poly_id)
+                         
             elif was_active_before and not is_active_now:
                 # Deactivated -> Subtract its gravity (it's gone)
                 for li in range(6):
                     gi = ep['nodes'][li]
                     delta_F_external[gi*2:gi*2+2] -= ep['F_grav'][li*2:li*2+2]
+            elif is_active_now and was_active_before:
+                 # Debug: Check for "Silent Skip" (Parent thought active, but no stress)
+                 # Only if gravity is significant (non-zero density)
+                 if np.linalg.norm(ep['F_grav']) > 1e-9:
+                     stresses = element_stress_state.get(ep['id'], [])
+                     has_stress = any(np.linalg.norm(s) > 1e-6 for s in stresses)
+                     if not has_stress:
+                         if poly_id not in logged_silent_skip_polys:
+                             log.append(f"WARNING: Polygon {poly_id} treated as ALREADY ACTIVE in Phase '{phase.name}', but has ~0 stress. Gravity load skipped! Potential bug in parent_active_indices or snapshot restore.")
+                             logged_silent_skip_polys.add(poly_id)
                     
         # B. Stress Release from Deactivated Elements (Excavation)
         for ep in elem_props_all:
@@ -666,6 +822,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
             apply_all_loads(parent_phase.active_load_ids, parent_load_vectors)
         
         delta_F_external += (current_load_vectors - parent_load_vectors)
+        
+        # D. Incremental Gravity from Material Changes (unit weight difference)
+        delta_F_external += delta_F_grav_material
         
         # 5. Out-of-Balance Forces (Internal Stress vs External Load) - Initial F_int
         F_int_initial = np.zeros(num_dof)
@@ -925,7 +1084,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 yield {"type": "step_point", "content": pt}
                 print(msg) 
                 
-                if iteration < settings.min_desired_iterations: step_size *= 1.2
+                if iteration < settings.min_desired_iterations: step_size *= 1.5
                 elif iteration > settings.max_desired_iterations: step_size *= 0.5
 
             else:
@@ -1014,9 +1173,22 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 element_yield_state[eid] = phase_yield_history[eid]
                 if eid in phase_pwp_excess_history: element_pwp_excess_state[eid] = phase_pwp_excess_history[eid]
             log.append(f"Phase {phase.name} completed successfully.")
+            
+            # Save state snapshot for this phase so child phases can branch from it
+            phase_snapshots[phase.id] = {
+                'total_displacement': total_displacement.copy(),
+                'element_stress_state': copy.deepcopy(element_stress_state),
+                'element_strain_state': copy.deepcopy(element_strain_state),
+                'element_yield_state': copy.deepcopy(element_yield_state),
+                'element_pwp_excess_state': copy.deepcopy(element_pwp_excess_state),
+                'current_water_level_data': copy.deepcopy(current_water_level_data),
+                'current_water_level_id': current_water_level_id,
+                'elem_materials': {ep['id']: (ep['material'], ep['K'].copy(), ep['F_grav'].copy(), ep['D'].copy(), copy.deepcopy(ep['gauss_points'])) for ep in elem_props_all},
+            }
         else:
             log.append(f"Phase {phase.name} failed at step {step_count}.")
-            break
+            failed_phases.add(phase.id)
+            # Don't break — other branches may still succeed
 
     yield {"type": "final", "content": {
         "success": all(pr['success'] for pr in phase_results),

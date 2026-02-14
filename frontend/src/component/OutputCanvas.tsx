@@ -40,6 +40,100 @@ const getStressColor = (v: number) => {
     return getJetColor(1 - v);
 };
 
+const BoundaryOverlay = ({
+    mesh,
+    phaseResult,
+    phaseRequest,
+    deformationScale,
+    prevPhaseResult
+}: {
+    mesh: MeshResponse,
+    phaseResult: any,
+    phaseRequest: PhaseRequest,
+    deformationScale: number,
+    prevPhaseResult: any
+}) => {
+    const { fixedPositions, rollerPositions } = useMemo(() => {
+        const fixed: number[] = [];
+        const roller: number[] = [];
+
+        // Helper to get deformed pos
+        const getDeformedPos = (nIdx: number) => {
+            let x = mesh.nodes[nIdx][0];
+            let y = mesh.nodes[nIdx][1];
+            if (phaseResult) {
+                const d = phaseResult.displacements.find((d: any) => d.id === nIdx + 1);
+                if (d) {
+                    const resetVisual = phaseRequest?.reset_displacements || false;
+                    let dx = d.ux;
+                    let dy = d.uy;
+                    if (resetVisual && prevPhaseResult) {
+                        const dPrev = prevPhaseResult.displacements.find((d: any) => d.id === nIdx + 1);
+                        if (dPrev) {
+                            dx -= dPrev.ux;
+                            dy -= dPrev.uy;
+                        }
+                    }
+                    x += dx * deformationScale;
+                    y += dy * deformationScale;
+                }
+            }
+            return [x, y, 0.01]; // Slight Z offset
+        };
+
+        if (mesh.boundary_conditions) {
+            mesh.boundary_conditions.full_fixed.forEach(bc => {
+                const [x, y, z] = getDeformedPos(bc.node);
+                fixed.push(x, y, z);
+            });
+            mesh.boundary_conditions.normal_fixed.forEach(bc => {
+                const [x, y, z] = getDeformedPos(bc.node);
+                roller.push(x, y, z);
+            });
+        }
+
+        return {
+            fixedPositions: new Float32Array(fixed),
+            rollerPositions: new Float32Array(roller)
+        };
+    }, [mesh, phaseResult, deformationScale, phaseRequest, prevPhaseResult]);
+
+    return (
+        <group>
+            {/* Full Fixed - Red Squares */}
+            {fixedPositions.length > 0 && (
+                <points>
+                    <bufferGeometry>
+                        <bufferAttribute
+                            attach="attributes-position"
+                            count={fixedPositions.length / 3}
+                            array={fixedPositions}
+                            itemSize={3}
+                            args={[fixedPositions, 3]}
+                        />
+                    </bufferGeometry>
+                    <pointsMaterial color="red" size={6} sizeAttenuation={false} />
+                </points>
+            )}
+            {/* Roller - Orange Circles */}
+            {rollerPositions.length > 0 && (
+                <points>
+                    <bufferGeometry>
+                        <bufferAttribute
+                            attach="attributes-position"
+                            count={rollerPositions.length / 3}
+                            array={rollerPositions}
+                            itemSize={3}
+                            args={[rollerPositions, 3]}
+                        />
+                    </bufferGeometry>
+                    <pointsMaterial color="orange" size={5} sizeAttenuation={false} />
+                </points>
+            )}
+        </group>
+    );
+};
+
 const MeshResult = ({
     mesh,
     solverResult,
@@ -61,6 +155,7 @@ const MeshResult = ({
     ignorePhases?: boolean,
     materials: Material[]
 }) => {
+    // ... existing MeshResult logic ...
     const { positions, colors, wireframePositions, rangeData } = useMemo(() => {
         if (!mesh) return {
             positions: new Float32Array(0),
@@ -73,7 +168,7 @@ const MeshResult = ({
         const phaseResult = solverResult?.phases?.[currentPhaseIdx];
         const phaseRequest = phases[currentPhaseIdx];
         const activePolygons = new Set(phaseRequest?.active_polygon_indices || []);
-        const overrides = phaseRequest?.material_overrides || {}; // Get Overrides
+        const currentMaterialMap = phaseRequest?.current_material || {}; // Get current material state
 
         const isSolidMaterial = outputType === OutputType.DEFORMED_MESH;
 
@@ -125,7 +220,7 @@ const MeshResult = ({
                 // Determine effective material
                 let mat = elemMatInfo?.material;
                 if (!ignorePhases && elemMatInfo?.polygon_id !== undefined && elemMatInfo.polygon_id !== null) {
-                    const overrideId = overrides[elemMatInfo.polygon_id];
+                    const overrideId = currentMaterialMap[elemMatInfo.polygon_id];
                     if (overrideId) {
                         const foundMat = materials.find(m => m.id === overrideId);
                         if (foundMat) mat = foundMat;
@@ -406,7 +501,7 @@ const MeshResult = ({
                     const elemMatInfo = mesh.element_materials[eIdx];
                     let mat = elemMatInfo?.material;
                     if (!ignorePhases && elemMatInfo?.polygon_id !== undefined && elemMatInfo.polygon_id !== null) {
-                        const overrideId = overrides[elemMatInfo.polygon_id];
+                        const overrideId = currentMaterialMap[elemMatInfo.polygon_id];
                         if (overrideId) {
                             const foundMat = materials.find(m => m.id === overrideId);
                             if (foundMat) mat = foundMat;
@@ -492,11 +587,19 @@ const MeshResult = ({
             {wireframePositions && (
                 <lineSegments key={`wire-m-${currentPhaseIdx}-${outputType}`}>
                     <bufferGeometry>
-                        <bufferAttribute attach="attributes-position" args={[wireframePositions, 3]} />
+                        <bufferAttribute attach="attributes-position" count={wireframePositions.length / 3} array={wireframePositions} itemSize={3} args={[wireframePositions, 3]} />
                     </bufferGeometry>
                     <lineBasicMaterial color="#d4d4d4" transparent opacity={0.4} />
                 </lineSegments>
             )}
+
+            <BoundaryOverlay
+                mesh={mesh}
+                phaseResult={solverResult?.phases?.[currentPhaseIdx]}
+                phaseRequest={phases[currentPhaseIdx]}
+                deformationScale={deformationScale}
+                prevPhaseResult={currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null}
+            />
         </group>
     );
 };

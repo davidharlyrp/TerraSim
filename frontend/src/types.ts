@@ -89,7 +89,7 @@ export interface MeshRequest {
     materials: Material[];
     pointLoads: PointLoad[];
     lineLoads?: LineLoad[];
-    water_level?: Point[]; // Deprecated
+    // water_level removed
     water_levels?: WaterLevel[]; // NEW
     mesh_settings?: MeshSettings; // NEW: Global mesh settings
 }
@@ -181,7 +181,9 @@ export interface PhaseRequest {
     active_polygon_indices: number[];
     active_load_ids: string[];
     reset_displacements?: boolean;
-    material_overrides?: Record<number, string>; // polygon_index -> material_id
+    // NEW: Full material state for this phase
+    current_material: Record<number, string>; // poly_idx -> material_id
+    parent_material: Record<number, string>; // poly_idx -> material_id (snapshot of parent)
     active_water_level_id?: string; // NEW
 }
 
@@ -189,7 +191,7 @@ export interface SolverRequest {
     mesh: MeshResponse;
     phases: PhaseRequest[]; // Sequence of phases
     settings?: SolverSettings;
-    water_level?: Point[];
+    // water_level removed
     water_levels?: WaterLevel[]; // NEW
     point_loads?: PointLoad[]; // Definitions
     line_loads?: LineLoad[];

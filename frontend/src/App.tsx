@@ -15,13 +15,16 @@ import { InputSidebar } from './component/InputSidebar';
 import { MeshSidebar } from './component/MeshSidebar';
 import { StagingSidebar } from './component/StagingSidebar';
 import { ResultSidebar } from './component/ResultSidebar';
-import { SAMPLE_MESH_REQUEST, SAMPLE_PHASES, SAMPLE_MATERIALS, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS } from './sample_data';
+import { DEFAULT_PHASES, DEFAULT_MATERIALS, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS } from './sample_data';
+import { SampleManifest } from './data/samples';
 import { api, ApiError } from './api';
 import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel } from './types';
 import { MaterialModal } from './component/MaterialModal';
 import { SettingsModal } from './component/SettingsModal';
 import { CloudLoadModal } from './component/CloudLoadModal';
 import { FeedbackModal } from './component/FeedbackModal';
+import { SampleGalleryModal } from './component/SampleGalleryModal';
+import { propagateMaterialChanges } from './utils/materialUtils';
 import { APP_VERSION } from './version';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { pb } from './pb';
@@ -43,14 +46,16 @@ function MainApp() {
     const [activeTab, setActiveTab] = useState<WizardTab>(WizardTab.INPUT);
     const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+    const [isSampleGalleryOpen, setIsSampleGalleryOpen] = useState(false);
 
     // 2. Data State
-    const [materials, setMaterials] = useState<Material[]>(SAMPLE_MATERIALS);
-    const [polygons, setPolygons] = useState<PolygonData[]>(SAMPLE_MESH_REQUEST.polygons);
-    const [pointLoads, setPointLoads] = useState<PointLoad[]>(SAMPLE_MESH_REQUEST.pointLoads);
+    // 2. Data State
+    const [materials, setMaterials] = useState<Material[]>(DEFAULT_MATERIALS);
+    const [polygons, setPolygons] = useState<PolygonData[]>([]);
+    const [pointLoads, setPointLoads] = useState<PointLoad[]>([]);
     const [lineLoads, setLineLoads] = useState<LineLoad[]>([]);
-    const [waterLevels, setWaterLevels] = useState<WaterLevel[]>(SAMPLE_MESH_REQUEST.water_levels || []); // NEW
-    const [phases, setPhases] = useState<PhaseRequest[]>(SAMPLE_PHASES);
+    const [waterLevels, setWaterLevels] = useState<WaterLevel[]>([]); // NEW
+    const [phases, setPhases] = useState<PhaseRequest[]>(DEFAULT_PHASES);
     const [generalSettings, setGeneralSettings] = useState<GeneralSettings>(SAMPLE_GENERAL_SETTINGS);
     const [solverSettings, setSolverSettings] = useState<SolverSettings>(SAMPLE_SOLVER_SETTINGS);
     const [meshSettings, setMeshSettings] = useState<MeshSettings>(SAMPLE_MESH_SETTINGS);
@@ -139,7 +144,7 @@ function MainApp() {
                 materials,
                 pointLoads,
                 lineLoads,
-                water_level: undefined, // Deprecated
+                // water_level removed
                 water_levels: waterLevels, // NEW
                 mesh_settings: meshSettings
             });
@@ -178,7 +183,7 @@ function MainApp() {
                 mesh: meshResponse,
                 settings: solverSettings as any,
                 phases: phases,
-                water_level: undefined,
+                // water_level removed
                 water_levels: waterLevels, // NEW
                 point_loads: pointLoads,
                 line_loads: lineLoads,
@@ -441,7 +446,47 @@ function MainApp() {
         );
     };
 
-    const handleCloudSave = async () => {
+    const handleNewProject = () => {
+        showConfirm(
+            "Create New Project",
+            "This will clear all current data and start a fresh project. Any unsaved changes will be lost. Are you sure?",
+            () => {
+                setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+
+                // Reset to initial state
+                // Reset to initial state
+                setMaterials(DEFAULT_MATERIALS);
+                setPolygons([]);
+                setPointLoads([]);
+                setLineLoads([]);
+                setWaterLevels([]);
+                setPhases(DEFAULT_PHASES);
+                setGeneralSettings(SAMPLE_GENERAL_SETTINGS);
+                setSolverSettings(SAMPLE_SOLVER_SETTINGS);
+                setMeshSettings(SAMPLE_MESH_SETTINGS);
+
+                setProjectName("New Project");
+                setCloudProjectId(null);
+
+                setMeshResponse(null);
+                setSolverResponse(null);
+                setIsGeneratingMesh(false);
+                setIsRunningAnalysis(false);
+                setLiveStepPoints([]);
+                setEditingMaterial(null);
+                setDrawMode(null);
+                setSelectedEntity(null);
+
+                setActiveTab(WizardTab.INPUT);
+
+                showAlert("New Project", "Started a new project successfully.", 'success');
+            },
+            true, // Is Destructive
+            "Create New"
+        );
+    };
+
+    const handleCloudSave = async (asNew: boolean = false) => {
         if (!user) {
             showAlert("Login Required", "Please login to save to cloud.", 'warning');
             return;
@@ -473,7 +518,7 @@ function MainApp() {
 
         try {
             setIsCloudSaving(true);
-            if (cloudProjectId) {
+            if (cloudProjectId && !asNew) {
                 // Update existing
                 await pb.collection('terrasim_projects').update(cloudProjectId, {
                     name: projectName,
@@ -489,7 +534,7 @@ function MainApp() {
                     version: APP_VERSION
                 });
                 setCloudProjectId(record.id);
-                showAlert("Cloud Success", "Project created on cloud successfully!", 'success');
+                showAlert("Cloud Success", asNew ? "Project saved as new copy on cloud!" : "Project created on cloud successfully!", 'success');
             }
         } catch (error) {
             console.error("Cloud save failed:", error);
@@ -534,6 +579,33 @@ function MainApp() {
         );
     };
 
+    const handleLoadSample = (sampleProps: SampleManifest) => {
+        showConfirm(
+            "Load Sample Project",
+            `Loading "${sampleProps.name}" will replace current data. Are you sure?`,
+            () => {
+                setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+                setIsSampleGalleryOpen(false); // Close gallery
+
+                const sample = sampleProps.data;
+                setMaterials(sample.materials);
+                setPolygons(sample.polygons);
+                setPointLoads(sample.pointLoads);
+                setLineLoads(sample.lineLoads || []);
+                setWaterLevels(sample.waterLevels || []);
+                setPhases(sample.phases);
+                setProjectName(sample.name);
+
+                setCloudProjectId(null);
+                setMeshResponse(null);
+                setSolverResponse(null);
+                setActiveTab(WizardTab.INPUT);
+
+                showAlert("Sample Loaded", `"${sampleProps.name}" loaded successfully.`, 'success');
+            }
+        );
+    };
+
     const handleToggleActive = (type: 'polygon' | 'load', id: string | number) => {
         const newPhases = [...phases];
         const phase = { ...newPhases[currentPhaseIdx] };
@@ -545,11 +617,30 @@ function MainApp() {
 
         if (type === 'polygon') {
             const idx = id as number;
+            // Capture old state for propagation
+            const oldCurrentMat = { ...phase.current_material };
+            const nextCurrentMat = { ...phase.current_material };
+
             if (phase.active_polygon_indices.includes(idx)) {
                 phase.active_polygon_indices = phase.active_polygon_indices.filter(i => i !== idx);
+                delete nextCurrentMat[idx]; // Sync material state
             } else {
                 phase.active_polygon_indices = [...phase.active_polygon_indices, idx];
+                // Sync material state: Default to inheriting or base
+                if (phase.parent_material && phase.parent_material[idx]) {
+                    nextCurrentMat[idx] = phase.parent_material[idx];
+                } else if (polygons[idx]) {
+                    nextCurrentMat[idx] = polygons[idx].materialId;
+                }
             }
+            phase.current_material = nextCurrentMat;
+
+            // Assign back before propagation
+            newPhases[currentPhaseIdx] = phase;
+
+            // Propagate material changes
+            propagateMaterialChanges(newPhases, phase.id, oldCurrentMat, polygons);
+
         } else {
             const loadId = id as string;
             if (phase.active_load_ids.includes(loadId)) {
@@ -557,11 +648,10 @@ function MainApp() {
             } else {
                 phase.active_load_ids = [...phase.active_load_ids, loadId];
             }
+            newPhases[currentPhaseIdx] = phase;
         }
 
-        newPhases[currentPhaseIdx] = phase;
-
-        // NEW: Propagate to Safety children
+        // Keep existing Safety propagation for active set
         const propagateSafety = (pts: PhaseRequest[], parentId: string, activePolygons: number[], activeLoads: string[]) => {
             pts.forEach((ph, i) => {
                 if (ph.parent_id === parentId && ph.phase_type === PhaseType.SAFETY_ANALYSIS) {
@@ -579,37 +669,21 @@ function MainApp() {
 
         setPhases(newPhases);
     };
-
     const handleOverrideMaterial = (polyIdx: number, matId: string) => {
         const newPhases = [...phases];
         const phase = { ...newPhases[currentPhaseIdx] };
 
-        if (!phase.material_overrides) phase.material_overrides = {};
+        // Capture old state
+        const oldCurrentMat = { ...phase.current_material };
 
-        // If assigning same as original (hard to check cheaply without material lookup), just set it.
-        // Or if we want to "reset", we might need a separate action.
-        // For now, just set/overwrite.
-        phase.material_overrides = { ...phase.material_overrides, [polyIdx]: matId };
+        // Update current_material for this polygon
+        phase.current_material = { ...phase.current_material, [polyIdx]: matId };
 
         newPhases[currentPhaseIdx] = phase;
 
-        // Propagate overrides to child Safety phases
-        const propagateOverrides = (pts: PhaseRequest[], parentId: string) => {
-            pts.forEach((ph, i) => {
-                if (ph.parent_id === parentId && ph.phase_type === PhaseType.SAFETY_ANALYSIS) {
-                    const parent = pts.find(p => p.id === parentId);
-                    if (parent && parent.material_overrides) {
-                        pts[i] = {
-                            ...ph,
-                            material_overrides: { ...parent.material_overrides }
-                        };
-                        propagateOverrides(pts, ph.id);
-                    }
-                }
-            });
-        };
+        // Propagate to ALL child phases using shared utility
+        propagateMaterialChanges(newPhases, phase.id, oldCurrentMat, polygons);
 
-        propagateOverrides(newPhases, phase.id);
         setPhases(newPhases);
     };
 
@@ -624,6 +698,12 @@ function MainApp() {
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 selection:bg-blue-500/30">
             {!isValid && <AuthModal />}
+            {isSampleGalleryOpen && (
+                <SampleGalleryModal
+                    onClose={() => setIsSampleGalleryOpen(false)}
+                    onLoad={handleLoadSample}
+                />
+            )}
 
             <AppHeader
                 projectName={projectName}
@@ -631,7 +711,10 @@ function MainApp() {
                 onOpenSettings={() => setIsSettingsModalOpen(true)}
                 onSaveProject={handleSaveProject}
                 onLoadProject={handleLoadProject}
-                onCloudSave={handleCloudSave}
+                onCloudSave={() => handleCloudSave(false)}
+                onCloudSaveAsNew={() => handleCloudSave(true)}
+                onNewProject={handleNewProject}
+                onOpenSampleGallery={() => setIsSampleGalleryOpen(true)}
                 onCloudLoad={handleCloudLoad}
                 onOpenFeedback={() => setIsFeedbackModalOpen(true)}
                 isCloudSaving={isCloudSaving}
@@ -833,7 +916,7 @@ function MainApp() {
                                 activeTab={activeTab}
                                 currentPhaseType={currentPhase?.phase_type}
                                 generalSettings={generalSettings}
-                                materialOverrides={currentPhase?.material_overrides}
+                                currentMaterial={currentPhase?.current_material}
                                 onOverrideMaterial={handleOverrideMaterial}
                                 onUpdateWaterLevel={() => { }}
                             />

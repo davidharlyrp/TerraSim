@@ -6,6 +6,14 @@ export interface SoftwareUpdate {
 
 export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
     {
+        version: "v 0.2.6",
+        date: "2026-02-15",
+        changes: [
+            "staging analysis bug fix",
+            "add sample projects",
+        ]
+    },
+    {
         version: "v 0.2.5",
         date: "2026-02-13",
         changes: [
