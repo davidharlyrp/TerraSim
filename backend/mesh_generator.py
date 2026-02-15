@@ -18,96 +18,158 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
         all_segments = []
         regions = [] # [x, y, attribute, max_area]
         
-        # To deduplicate vertices, we use a map and distance check
-        # Previously used round(x,6) which is too strict for manual inputs.
-        # Now using linear search with tolerance 1e-3 (1mm).
-        # For typical boundary node counts (<1000), this is fast enough.
-        vertex_indices: List[Tuple[float, float, int]] = [] 
-        TOLERANCE = 1e-3 
-        
-        def get_vertex_index(x, y):
-            # Check existing vertices
-            for vx, vy, v_idx in vertex_indices:
-                dist_sq = (x - vx)**2 + (y - vy)**2
-                if dist_sq < TOLERANCE**2:
-                    return v_idx
-            
-            # New vertex
-            new_idx = len(all_vertices)
-            all_vertices.append([x, y])
-            vertex_indices.append((x, y, new_idx))
-            return new_idx
+        # To deduplicate vertices, we use a spatial hash (grid-based dictionary)
+        # to avoid O(N^2) linear search.
+        # Configuration
+        GRID_SIZE = 1e-3
+        def snap(val):
+            return round(val / GRID_SIZE) * GRID_SIZE
 
-        # Process each polygon
-        material_id_map = {m.id: i for i, m in enumerate(request.materials)}
-        
-        # Global Mesh Settings (Fallback)
+        # Global Mesh Settings
         global_mesh_size = request.mesh_settings.mesh_size if request.mesh_settings else 2.0
         global_refinement = request.mesh_settings.boundary_refinement_factor if request.mesh_settings else 1.0
 
-        for poly_idx, poly in enumerate(request.polygons):
-            # Calculate parameters: Use polygon-specific OR global fallback
-            target_mesh_size = poly.mesh_size if poly.mesh_size else global_mesh_size
-            refinement_factor = poly.boundary_refinement_factor if poly.boundary_refinement_factor else global_refinement
+        # To deduplicate vertices, we use a map with high precision rounding
+        # This handles float noise from unary_union without breaking topology
+        vertex_hash: Dict[Tuple[float, float], int] = {}
+        def get_vertex_index(x, y):
+            key = (round(x, 8), round(y, 8))
+            if key in vertex_hash:
+                return vertex_hash[key]
+            new_idx = len(all_vertices)
+            all_vertices.append([x, y])
+            vertex_hash[key] = new_idx
+            return new_idx
+
+        # Process each polygon and snap vertices early to ensure perfect junctions
+        material_id_map = {m.id: i for i, m in enumerate(request.materials)}
+        
+        # Collect all boundary lines (SNAPPED)
+        from shapely.ops import unary_union
+        from shapely.geometry import LineString, MultiLineString
+
+        boundary_lines = []
+        for poly in request.polygons:
+            coords = []
+            for p in poly.vertices:
+                coords.append((snap(p.x), snap(p.y)))
             
-            # Target segment length for boundaries
-            target_seg_len = target_mesh_size / max(refinement_factor, 0.1)
-            # Max area for triangle (Area = sqrt(3)/4 * side^2 for equilateral)
-            max_area = 0.5 * (target_mesh_size ** 2)
+            if len(coords) < 3: continue
             
-            poly_pts = poly.vertices
-            num_pts = len(poly_pts)
+            # Deduplicate sequential snapped points
+            clean_coords = []
+            for c in coords:
+                if not clean_coords or c != clean_coords[-1]:
+                    clean_coords.append(c)
+            # Close it
+            if clean_coords[0] != clean_coords[-1]:
+                clean_coords.append(clean_coords[0])
             
-            # 1. Add Vertices and Segments with Discretization
-            for i in range(num_pts):
-                p1 = poly_pts[i]
-                p2 = poly_pts[(i + 1) % num_pts]
+            if len(clean_coords) < 4: continue 
+            boundary_lines.append(LineString(clean_coords))
+        
+        print("Performing Unary Union (Cleaning boundaries)...", flush=True)
+        # unary_union on snapped lines is much more robust
+        clean_boundaries = unary_union(boundary_lines)
+        print("Boundary cleaning done.", flush=True)
+        
+        # Flatten to list of LineStrings
+        def flatten_geoms(geom):
+            if geom.is_empty: return []
+            if geom.geom_type == 'LineString': return [geom]
+            if hasattr(geom, 'geoms'):
+                res = []
+                for g in geom.geoms:
+                    res.extend(flatten_geoms(g))
+                return res
+            return []
+        
+        unioned_lines = flatten_geoms(clean_boundaries)
+        
+        # Pre-calculate target segment lengths per polygon
+        poly_target_lens = []
+        MIN_SAFE_LEN = 1e-4
+        target_global_len = max(global_mesh_size / max(global_refinement, 0.1), MIN_SAFE_LEN)
+        for poly in request.polygons:
+            target_ms = poly.mesh_size if poly.mesh_size else global_mesh_size
+            ref_f = poly.boundary_refinement_factor if poly.boundary_refinement_factor else global_refinement
+            poly_target_lens.append(max(target_ms / max(ref_f, 0.1), MIN_SAFE_LEN))
+
+        # 1. Add Vertices and Segments with Discretization from Cleaned Boundaries
+        print(f"Discretizing {len(unioned_lines)} boundary lines with localized refinement...", flush=True)
+        
+        # Prepare polygon boundaries for fast distance checks
+        shapely_polys = [ShapelyPolygon([(snap(p.x), snap(p.y)) for p in poly.vertices]) for poly in request.polygons]
+        
+        for line in unioned_lines:
+            coords = list(line.coords)
+            
+            # Find the local target length for this specific line
+            # We check the midpoint of the entire line against original polygons
+            mid_pt = line.interpolate(0.5, normalized=True)
+            local_min_len = target_global_len
+            
+            for p_idx, s_poly in enumerate(shapely_polys):
+                # distance to boundary is more robust for shared edges
+                if s_poly.boundary.distance(mid_pt) < 1e-3:
+                    local_min_len = min(local_min_len, poly_target_lens[p_idx])
+            
+            for i in range(len(coords) - 1):
+                p1_c = coords[i]
+                p2_c = coords[i+1]
                 
-                # Calculate distance
-                dx = p2.x - p1.x
-                dy = p2.y - p1.y
+                dx = p2_c[0] - p1_c[0]
+                dy = p2_c[1] - p1_c[1]
                 dist = np.sqrt(dx*dx + dy*dy)
                 
-                # Number of subdivisions
-                n_segs = max(1, int(np.ceil(dist / target_seg_len)))
+                if dist < 1e-8: continue 
                 
-                # Generate points along the edge
-                prev_idx = get_vertex_index(p1.x, p1.y)
+                # Use local_min_len for this specific boundary segment
+                n_segs = min(max(1, int(np.ceil(dist / local_min_len))), 1000)
                 
+                prev_idx = get_vertex_index(p1_c[0], p1_c[1])
                 for j in range(1, n_segs + 1):
                     t = j / n_segs
-                    # If it's the last point, it's p2
                     if j == n_segs:
-                        curr_x, curr_y = p2.x, p2.y
+                        curr_x, curr_y = p2_c[0], p2_c[1]
                     else:
-                        curr_x = p1.x + t * dx
-                        curr_y = p1.y + t * dy
+                        curr_x = p1_c[0] + t * dx
+                        curr_y = p1_c[1] + t * dy
                     
                     curr_idx = get_vertex_index(curr_x, curr_y)
-                    
-                    # Add segment (order doesn't matter for undirected graph)
-                    # Use frozenset or sorted tuple to deduplicate boundaries shared by polygons
-                    # Actually triangle handles duplicate segments fine usually, or we can dedup.
-                    # We'll just add them raw for now, triangle ignores dupes or we can cleaner approach.
-                    # Better to dedup to avoid warnings.
-                    seg = tuple(sorted((prev_idx, curr_idx)))
-                    all_segments.append(seg)
-                    
+                    if prev_idx != curr_idx:
+                        seg = tuple(sorted((prev_idx, curr_idx)))
+                        all_segments.append(seg)
                     prev_idx = curr_idx
 
-            # 2. Define Region Attribute (Material) and Area Constraint
+        # 2. Define Regions (Materials) - Still using original polygons for point-in-poly
+        print(f"Defining {len(request.polygons)} regions...", flush=True)
+        for poly_idx, poly in enumerate(request.polygons):
             # Find a point inside the polygon
-            shapely_poly = ShapelyPolygon([(p.x, p.y) for p in poly_pts])
+            shapely_poly = ShapelyPolygon([(p.x, p.y) for p in poly.vertices])
+            if shapely_poly.is_empty: continue
+            
             # representative_point is guaranteed to be within the polygon
             inner_pt = shapely_poly.representative_point()
             
+            target_mesh_size = poly.mesh_size if poly.mesh_size else global_mesh_size
+            max_area = 0.5 * (target_mesh_size ** 2)
+            
+            # Safety: Don't allow area to be too small relative to model bounding box
+            # This prevents accidental element explosion
+            # If model is 100x100, area is 10000. 10000 / 0.5 = 20k elements.
+            # If user sets mesh_size = 0.01, max_area = 0.00005. 10k / 0.00005 = 200M elements (DEAD).
+            MIN_AREA = 1e-4 
+            if max_area < MIN_AREA:
+                print(f"WARNING: max_area {max_area} for poly {poly_idx} is too small, capping to {MIN_AREA}", flush=True)
+                max_area = MIN_AREA
+
             mat_idx = 0
             if poly.materialId in material_id_map:
                 mat_idx = material_id_map[poly.materialId]
             
-            # Attribute is float in triangle, we'll store poly_idx
-            # Region: [x, y, attribute, max_area]
             regions.append([inner_pt.x, inner_pt.y, float(poly_idx), max_area])
+            print(f"  Region {poly_idx}: at ({inner_pt.x:.2f}, {inner_pt.y:.2f}), max_area={max_area:.4f}", flush=True)
 
         # --- NEW: Add Point Load Coordinates to Vertices ---
         # This forces triangle to create a node at exactly these coordinates.
@@ -126,7 +188,6 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
         unique_segments = list(set(all_segments))
         
         # --- 2. Triangulation ---
-        
         tri_input = {
             'vertices': np.array(all_vertices),
             'segments': np.array(unique_segments),
@@ -138,6 +199,7 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
         # 'a' = Area constraints (respect regions max_area)
         # 'A' = Assign attributes to triangles
         mesh_data = triangle.triangulate(tri_input, 'pqaA')
+        print("Triangulation done.", flush=True)
         
         nodes = mesh_data['vertices'].tolist()
         elements_linear = mesh_data['triangles'].tolist()
@@ -333,6 +395,7 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
             elements=[],
             boundary_conditions=BoundaryConditionsResponse(full_fixed=[], normal_fixed=[]),
             point_load_assignments=[],
+            line_load_assignments=[],
             element_materials=[],
             error=f"{get_error_info(ErrorCode.SYS_INTERNAL_ERROR)} | Raw: {str(e)}"
         )

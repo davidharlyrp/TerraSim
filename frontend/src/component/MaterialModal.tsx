@@ -56,17 +56,20 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                         setEdited({
                                             ...edited,
                                             material_model: val,
-                                            drainage_type: val === MaterialModel.LINEAR_ELASTIC ? DrainageType.NON_POROUS : edited.drainage_type
+                                            drainage_type:
+                                                val === MaterialModel.LINEAR_ELASTIC ? DrainageType.NON_POROUS :
+                                                    val === MaterialModel.HOEK_BROWN ? DrainageType.DRAINED :
+                                                        edited.drainage_type
                                         });
                                     }}
                                     className="input"
                                 >
                                     <option value={MaterialModel.LINEAR_ELASTIC}>Linear Elastic</option>
                                     <option value={MaterialModel.MOHR_COULOMB}>Mohr Coulomb</option>
+                                    <option value={MaterialModel.HOEK_BROWN}>Hoek-Brown (Rock)</option>
                                     <option disabled title="Under development">Hardening Soil</option>
                                     {/* <option disabled title="Under development">Soft Soil</option> */}
                                     <option disabled title="Under development">Cam Clay</option>
-                                    <option disabled title="Under development">Hoek-Brown</option>
                                 </select>
                             </div>
 
@@ -79,13 +82,19 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                     className="input"
                                 >
                                     <option value={DrainageType.DRAINED}>Drained</option>
-                                    <option value={DrainageType.UNDRAINED_A}>Undrained A</option>
-                                    <option value={DrainageType.UNDRAINED_B}>Undrained B</option>
-                                    <option value={DrainageType.UNDRAINED_C}>Undrained C</option>
-                                    {edited.material_model === MaterialModel.LINEAR_ELASTIC && <option value={DrainageType.NON_POROUS}>Non Porous</option>}
+                                    {edited.material_model === MaterialModel.MOHR_COULOMB && <option value={DrainageType.UNDRAINED_A}>Undrained A</option>}
+                                    {edited.material_model === MaterialModel.MOHR_COULOMB && <option value={DrainageType.UNDRAINED_B}>Undrained B</option>}
+                                    {edited.material_model === MaterialModel.MOHR_COULOMB && <option value={DrainageType.UNDRAINED_C}>Undrained C</option>}
+                                    {(edited.material_model === MaterialModel.LINEAR_ELASTIC || edited.material_model === MaterialModel.HOEK_BROWN) && <option value={DrainageType.NON_POROUS}>Non Porous</option>}
                                 </select>
                             </div>
                         </div>
+
+                        {edited.material_model === MaterialModel.HOEK_BROWN && (
+                            <div className="flex flex-col gap-1 border-b border-slate-200 dark:border-slate-800 py-4">
+                                <span className="italic text-[10px] text-slate-600 dark:text-slate-400 dark:font-light">* Hoek-Brown material model will take much more time to solve.</span>
+                            </div>
+                        )}
                     </div>
 
                     <div>
@@ -159,7 +168,7 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                 )}
                             </div>
 
-                            {(edited.drainage_type === DrainageType.DRAINED || edited.drainage_type === DrainageType.UNDRAINED_A) && (
+                            {((edited.drainage_type === DrainageType.DRAINED || edited.drainage_type === DrainageType.UNDRAINED_A) && edited.material_model === MaterialModel.MOHR_COULOMB) && (
                                 <div className="grid grid-cols-4 items-center gap-1">
                                     <span className="itemlabel col-span-2">
                                         Cohesion, <MathRender tex="c'" />
@@ -197,7 +206,7 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                 </div>
                             )}
 
-                            {(edited.drainage_type === DrainageType.UNDRAINED_B || edited.drainage_type === DrainageType.UNDRAINED_C) && (
+                            {(edited.drainage_type === DrainageType.UNDRAINED_B || edited.drainage_type === DrainageType.UNDRAINED_C || edited.material_model === MaterialModel.MOHR_COULOMB) && (
                                 <div className="grid grid-cols-4 items-center gap-1">
                                     <span className="itemlabel col-span-2">
                                         Shear Strength, <MathRender tex="S_u" />
@@ -221,6 +230,101 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                         onChange={e => setEdited({ ...edited, k0_x: e.target.value ? Number(e.target.value) : undefined })}
                                         className="input col-span-2"
                                     />
+                                </div>
+                            )}
+
+                            {edited.material_model === MaterialModel.HOEK_BROWN && (
+                                <div className="grid grid-cols-4 items-center gap-1">
+                                    <span className="itemlabel col-span-2">
+                                        UCS Rock, <MathRender tex="\sigma_{ci}" />
+                                    </span>
+                                    <input
+                                        type="number"
+                                        value={edited.sigma_ci || ""}
+                                        onChange={e => setEdited({ ...edited, sigma_ci: Number(e.target.value) })}
+                                        className="input"
+                                    />
+                                    <span className="itemlabel text-center"><MathRender tex="kN/m^2" /></span>
+
+                                    <span className="itemlabel col-span-2">
+                                        GSI Index
+                                    </span>
+                                    <input
+                                        type="number"
+                                        value={edited.gsi || ""}
+                                        min="0"
+                                        max="100"
+                                        onChange={e => {
+                                            const gsi = Number(e.target.value);
+                                            const mi = edited.mi || 10;
+                                            const D = edited.disturbFactor || 0;
+                                            const mb = mi * Math.exp((gsi - 100) / (28 - 14 * D));
+                                            const s = Math.exp((gsi - 100) / (9 - 3 * D));
+                                            const a = 0.5 + (1 / 6) * (Math.exp(-gsi / 15) - Math.exp(-20 / 3));
+                                            setEdited({ ...edited, gsi, m_b: mb, s, a });
+                                        }}
+                                        className="input"
+                                    />
+                                    <span className="itemlabel text-center">( 0-100 )</span>
+
+                                    <span className="itemlabel col-span-2">
+                                        Intact Parameter, <MathRender tex="m_i" />
+                                    </span>
+                                    <input
+                                        type="number"
+                                        value={edited.mi || ""}
+                                        min="5"
+                                        max="35"
+                                        onChange={e => {
+                                            const mi = Number(e.target.value);
+                                            const gsi = edited.gsi || 50;
+                                            const D = edited.disturbFactor || 0;
+                                            const mb = mi * Math.exp((gsi - 100) / (28 - 14 * D));
+                                            setEdited({ ...edited, mi, m_b: mb });
+                                        }}
+                                        className="input"
+                                    />
+                                    <span className="itemlabel text-center">( 5-35 )</span>
+
+                                    <span className="itemlabel col-span-2">
+                                        Disturbance Factor, <MathRender tex="D" />
+                                    </span>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        value={edited.disturbFactor ?? ""}
+                                        min="0"
+                                        max="1"
+                                        onChange={e => {
+                                            const D = Number(e.target.value);
+                                            const gsi = edited.gsi || 50;
+                                            const mi = edited.mi || 10;
+                                            const mb = mi * Math.exp((gsi - 100) / (28 - 14 * D));
+                                            const s = Math.exp((gsi - 100) / (9 - 3 * D));
+                                            setEdited({ ...edited, disturbFactor: D, m_b: mb, s });
+                                        }}
+                                        className="input"
+                                    />
+                                    <span className="itemlabel text-center">( 0-1 )</span>
+
+                                    <span className="itemlabel col-span-2 mt-1">
+                                        Lateral Pressure Coeff, <MathRender tex="K_0" />
+                                    </span>
+                                    <input
+                                        type="number"
+                                        placeholder={(edited.poissonsRatio / (1 - edited.poissonsRatio)).toFixed(3)}
+                                        value={edited.k0_x ?? ""}
+                                        onChange={e => setEdited({ ...edited, k0_x: e.target.value ? Number(e.target.value) : undefined })}
+                                        className="input col-span-2"
+                                    />
+                                    <div className="col-span-4 grid grid-cols-4 gap-1 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 opacity-60">
+                                        <span className="itemlabel flex items-center">Calculated <MathRender tex="m_b" /></span>
+                                        <input type="number" value={edited.m_b?.toFixed(4) || ""} disabled className="input bg-slate-50 dark:bg-slate-800" />
+                                        <span className="itemlabel ml-4 flex items-center">Calculated <MathRender tex="s" /></span>
+                                        <input type="number" value={edited.s?.toFixed(4) || ""} disabled className="input bg-slate-50 dark:bg-slate-800" />
+                                        <span className="itemlabel flex items-center">Calculated <MathRender tex="a" /></span>
+                                        <input type="number" value={edited.a?.toFixed(4) || ""} disabled className="input bg-slate-50 dark:bg-slate-800" />
+                                    </div>
                                 </div>
                             )}
                         </div>

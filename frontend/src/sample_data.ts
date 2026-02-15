@@ -43,9 +43,11 @@ export const SAMPLE_SOLVER_SETTINGS: SolverSettings = {
 export const SAMPLE_GENERAL_SETTINGS = {
     snapToGrid: true,
     snapSpacing: 0.5,
+    hideGrid: false,
+    hideRuler: false
 };
 
 export const SAMPLE_MESH_SETTINGS: MeshSettings = {
-    mesh_size: 0.5,
-    boundary_refinement_factor: 1,
+    mesh_size: 1,
+    boundary_refinement_factor: 0.5,
 };

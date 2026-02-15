@@ -6,11 +6,13 @@ export interface SoftwareUpdate {
 
 export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
     {
-        version: "v 0.2.6",
+        version: "v 0.3.0",
         date: "2026-02-15",
         changes: [
+            "add Hoek-Brown material model for rock",
             "staging analysis bug fix",
             "add sample projects",
+            "hide grid feature"
         ]
     },
     {

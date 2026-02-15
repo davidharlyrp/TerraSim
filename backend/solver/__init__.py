@@ -5,7 +5,8 @@ Modular FEA solver implementation for geotechnical analysis.
 Main Components:
 - element_cst: CST element stiffness and force computation
 - k0_procedure: Geostatic initial stress initialization
-- plasticity: Mohr-Coulomb plasticity model
+- mohr_coulomb: Mohr-Coulomb plasticity model
+- hoek_brown: Hoek-Brown plasticity model
 - phase_solver: Main analysis phases solver loop
 
 Usage:

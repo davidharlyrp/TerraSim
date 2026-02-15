@@ -66,13 +66,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                     {activeSection === 'general' ? (
-                        <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2">
+                        <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-bottom-2">
+
+
 
 
                             <div className="flex items-center justify-between group p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
                                 <div className="space-y-1">
+                                    <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Hide Grid</label>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={localGeneral.hideGrid}
+                                        onChange={e => setLocalGeneral({ ...localGeneral, hideGrid: e.target.checked })}
+                                    />
+                                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
+                            <div className="flex items-center justify-between group p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                                <div className="space-y-1">
+                                    <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Hide Ruler</label>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={localGeneral.hideRuler}
+                                        onChange={e => setLocalGeneral({ ...localGeneral, hideRuler: e.target.checked })}
+                                    />
+                                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
+                            <div className="flex items-center justify-between group p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                                <div className="space-y-1">
                                     <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Snap to Grid</label>
-                                    <p className="text-[11px] text-slate-500">Enable automatic alignment to the grid</p>
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                     <input
@@ -102,7 +133,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                     ) : (
                         <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2">
-                            <div className="grid grid-cols-2 gap-2 ">
+                            <div className="grid grid-cols-2 gap-1 ">
                                 <div className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
                                     <label className="itemlabel">Tolerance <MathRender tex="\epsilon" /></label>
                                     <input

@@ -21,6 +21,7 @@ class MaterialModel(str, Enum):
     # """Material constitutive model types"""
     LINEAR_ELASTIC = "linear_elastic"
     MOHR_COULOMB = "mohr_coulomb"
+    HOEK_BROWN = "hoek_brown"
     # Future: HARDENING_SOIL, CAM_CLAY, etc.
 
 class DrainageType(str, Enum):
@@ -50,6 +51,14 @@ class Material(BaseModel):
     cohesion: Optional[float] = None
     frictionAngle: Optional[float] = None
     undrainedShearStrength: Optional[float] = None
+    # Hoek-Brown parameters
+    sigma_ci: Optional[float] = None
+    gsi: Optional[float] = None
+    disturbFactor: Optional[float] = None
+    m_i: Optional[float] = None
+    m_b: Optional[float] = None
+    s: Optional[float] = None
+    a: Optional[float] = None
     dilationAngle: Optional[float] = 0.0
     thickness: Optional[float] = 1.0
     permeability: Optional[float] = 0.0

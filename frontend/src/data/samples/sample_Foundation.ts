@@ -1,5 +1,5 @@
 
-import { DrainageType, MaterialModel, PhaseRequest, PhaseType, PointLoad, PolygonData, Material, WaterLevel } from '../../types';
+import { DrainageType, MaterialModel, PhaseRequest, PhaseType, PointLoad, PolygonData, Material, WaterLevel, GeneralSettings } from '../../types';
 
 // Sample Materials
 export const SAMPLE_MATERIALS: Material[] = [
@@ -272,6 +272,13 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_material: { ...BASE_MATERIAL_MAP },
     }
 ];
+
+export const SAMPLE_GENERAL_SETTINGS: GeneralSettings = {
+    snapSpacing: 0.5,
+    snapToGrid: true,
+    hideGrid: false,
+    hideRuler: false,
+};
 
 export const SAMPLE_FOUNDATION = {
     name: "Foundation Sample",

@@ -37,8 +37,10 @@ TAGS_METADATA = [
 app = FastAPI(
     title="DaharTerraSim Backend",
     description="Geotechnical Analysis Backend using CST FEA 2D",
-    version="0.2.6",
-    openapi_tags=TAGS_METADATA
+    version="0.3.0",
+    openapi_tags=TAGS_METADATA,
+    docs_url=None,
+    redoc_url=None
 )
 
 # Initialize Limiter
@@ -55,7 +57,8 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "DaharTerraSim Backend API v 0.2.6 - Active"}
+    return {"message": "DaharTerraSim Backend API v 0.3.0 - Active"}
+
 
 @app.post("/api/mesh/generate", response_model=MeshResponse, tags=["mesh"])
 @limiter.limit("5/minute")
@@ -64,21 +67,41 @@ async def create_mesh(mesh_req: MeshRequest, request: Request, user_payload: dic
     Generate a 2D triangular mesh based on provided polygons and settings.
     Runs in a thread pool to avoid blocking the event loop.
     """
-    print(f"Received mesh generation request with {len(mesh_req.polygons)} polygons")
+    print(f"--- [START] Mesh Generation for {len(mesh_req.polygons)} polygons ---")
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, generate_mesh, mesh_req)
-        if not response.success:
-             return response
+        # 5-second timeout for mesh generation
+        start_time = asyncio.get_event_loop().time()
+        response = await asyncio.wait_for(
+            loop.run_in_executor(None, generate_mesh, mesh_req),
+            timeout=5.0
+        )
+        duration = asyncio.get_event_loop().time() - start_time
+        print(f"--- [SUCCESS] Mesh Generation completed in {duration:.2f}s ---")
         return response
-    except Exception as e:
-        print(f"Error processing mesh request: {e}")
+    except asyncio.TimeoutError:
+        print("--- [TIMEOUT] Mesh Generation exceeded 5 seconds ---")
         return MeshResponse(
             success=False,
             nodes=[],
             elements=[],
-            boundary_conditions={"full_fixed": [], "normal_fixed": []},
+            boundary_conditions=BoundaryConditionsResponse(full_fixed=[], normal_fixed=[]),
             point_load_assignments=[],
+            line_load_assignments=[],
+            element_materials=[],
+            error="Mesh generation timed out. The geometry might be too complex or the mesh size too small."
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"--- [ERROR] Mesh Generation failed: {e} ---")
+        return MeshResponse(
+            success=False,
+            nodes=[],
+            elements=[],
+            boundary_conditions=BoundaryConditionsResponse(full_fixed=[], normal_fixed=[]),
+            point_load_assignments=[],
+            line_load_assignments=[],
             element_materials=[],
             error=str(e)
         )
@@ -199,6 +222,11 @@ async def run_sequential_analysis(request: LegacySequentialRequest, user_payload
                     frictionAngle=float(mat_data.get('frictionAngle', 0)),
                     undrainedShearStrength=float(mat_data.get('undrainedShearStrength', 0)),
                     dilationAngle=float(mat_data.get('dilationAngle', 0)),
+                    sigma_ci=float(mat_data.get('sigma_ci', 0)),
+                    gsi=float(mat_data.get('gsi', 0)),
+                    mi=float(mat_data.get('mi', 0)),
+                    disturbFactor=float(mat_data.get('disturbFactor', 0)),
+                    k0_x=float(mat_data.get('k0_x', 0)),
                     thickness=float(mat_data.get('thickness', 1.0)),
                     permeability=float(mat_data.get('permeability', 0)),
                     voidRatio=float(mat_data.get('voidRatio', 0.5)),
@@ -297,7 +325,7 @@ async def run_sequential_analysis(request: LegacySequentialRequest, user_payload
                          # Effective approx same as total if no pore pressure yet
                         "effective_stress_1": s1,
                         "effective_stress_3": s3,
-                        # ✅ FIX: Pass plasticity flags
+                        # FIX: Pass plasticity flags
                         "is_yielded": s.is_yielded,
                         "yield_function": s.yield_function
                     }

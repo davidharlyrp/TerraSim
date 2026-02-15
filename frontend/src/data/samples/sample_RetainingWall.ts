@@ -354,7 +354,9 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
 
 export const SAMPLE_GENERAL_SETTINGS: GeneralSettings = {
     snapSpacing: 0.5,
-    snapToGrid: true
+    snapToGrid: true,
+    hideGrid: false,
+    hideRuler: false,
 };
 
 export const SAMPLE_SOLVER_SETTINGS: SolverSettings = {

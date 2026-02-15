@@ -18,7 +18,8 @@ export interface PolygonData {
 
 export enum MaterialModel {
     LINEAR_ELASTIC = "linear_elastic",
-    MOHR_COULOMB = "mohr_coulomb"
+    MOHR_COULOMB = "mohr_coulomb",
+    HOEK_BROWN = "hoek_brown"
 }
 
 export enum DrainageType {
@@ -56,6 +57,14 @@ export interface Material {
     specificGravity?: number;
     material_model?: MaterialModel;
     drainage_type?: DrainageType;
+    // Hoek-Brown parameters
+    sigma_ci?: number;
+    gsi?: number;
+    mi?: number;
+    disturbFactor?: number;
+    m_b?: number;
+    s?: number;
+    a?: number;
     k0_x?: number;
     k0_z?: number;
 }
@@ -259,4 +268,6 @@ export enum OutputType {
 export interface GeneralSettings {
     snapToGrid: boolean;
     snapSpacing: number;
+    hideGrid: boolean;
+    hideRuler: boolean;
 }

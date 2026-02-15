@@ -23,7 +23,8 @@ from scipy.sparse.linalg import spsolve
 from numba import njit
 from .element_t6 import compute_element_matrices_t6, GAUSS_WEIGHTS
 from .k0_procedure import compute_vertical_stress_k0_t6
-from .plasticity import mohr_coulomb_yield, return_mapping_mohr_coulomb
+from .mohr_coulomb import mohr_coulomb_yield, return_mapping_mohr_coulomb
+from .hoek_brown import hoek_brown_yield, return_mapping_hoek_brown
 
 
 @njit
@@ -65,10 +66,16 @@ def compute_elements_stresses_numba(
     D_elastic_arr,
     pwp_static_arr,
     mat_drainage_arr, 
-    mat_model_arr, # 0: LinearElastic, 1: MohrCoulomb
+    mat_model_arr, # 0: LinearElastic, 1: Mohr Coulomb, 2: Hoek-Brown
     mat_c_arr,
     mat_phi_arr,
     mat_su_arr,
+    mat_sigma_ci_arr,
+    mat_gsi_arr,
+    mat_disturb_factor_arr,
+    mat_mb_arr,
+    mat_s_arr,
+    mat_a_arr,
     penalties_arr,
     is_srm,
     target_m_stage,
@@ -101,6 +108,12 @@ def compute_elements_stresses_numba(
         c_val = mat_c_arr[i]
         phi_val = mat_phi_arr[i]
         su_val = mat_su_arr[i]
+        sigma_ci_val = mat_sigma_ci_arr[i]
+        gsi_val = mat_gsi_arr[i]
+        disturb_factor_val = mat_disturb_factor_arr[i]
+        mb_val = mat_mb_arr[i]
+        s_val = mat_s_arr[i]
+        a_val = mat_a_arr[i]
         penalty_val = penalties_arr[i]
         
         for gp_idx in range(3):
@@ -179,6 +192,30 @@ def compute_elements_stresses_numba(
                     sig_eff_new, _, yld = return_mapping_mohr_coulomb(
                         sigma_eff_trial[0], sigma_eff_trial[1], sigma_eff_trial[2],
                         c_eff, phi_eff, D_el
+                    )
+                elif mmodel == 2: # Hoek-Brown
+                    sig_ci_f = sigma_ci_val
+                    mb_f = mb_val
+                    s_f = s_val
+                    gsi_n = gsi_val
+                    disturb_factor_n = disturb_factor_val
+                    a_f = a_val
+                    if is_srm:
+                        sig_ci_f = sigma_ci_val / target_m_stage
+                        mb_f = mb_val / target_m_stage # assuming mb is linear, (simplification)
+                        gsi_n = gsi_val / target_m_stage
+                        disturb_factor_n = disturb_factor_val * target_m_stage
+                        if disturb_factor_n > 1: 
+                            disturb_factor_n = 1
+                        else:
+                            disturb_factor_n = disturb_factor_n
+                        s_f = np.exp((gsi_n - 100) / (9 - 3 * disturb_factor_n))
+                        a_f = 0.5+(np.exp(-gsi_n/15)-np.exp(-20/3))/6
+                        
+                    
+                    sig_eff_new, _, yld = return_mapping_hoek_brown(
+                        sigma_eff_trial[0], sigma_eff_trial[1], sigma_eff_trial[2],
+                        sig_ci_f, mb_f, s_f, a_f, D_el
                     )
                 else:
                     sig_eff_new = sigma_eff_trial
@@ -937,6 +974,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
             mat = ep['material']
             penalty = 0.0
             if mat.drainage_type in [DrainageType.UNDRAINED_A, DrainageType.UNDRAINED_B]:
+                # Penalty Value (Bulk Modulus Air)
+                # Assume water bulk modulus Kw = 2.2e6 kPa and porosity = 0.3
                 Kw = 2.2e6; porosity = 0.3; penalty = Kw / porosity
                 E_skel = mat.effyoungsModulus or 10000.0
                 nu_skel = mat.poissonsRatio or 0.3
@@ -945,12 +984,64 @@ def solve_phases(request: SolverRequest, should_stop=None):
             penalties_arr.append(penalty)
         penalties_arr = np.array(penalties_arr)
 
-        # Material model mapping: 0: LINEAR_ELASTIC, 1: MOHR_COULOMB
+        # Material model mapping: 0: LINEAR_ELASTIC, 1: MOHR_COULOMB, 2: HOEK_BROWN
         model_map = {
             MaterialModel.LINEAR_ELASTIC: 0,
-            MaterialModel.MOHR_COULOMB: 1
+            MaterialModel.MOHR_COULOMB: 1,
+            MaterialModel.HOEK_BROWN: 2
         }
         mat_model_arr = np.array([model_map.get(ep['material'].material_model, 0) for ep in active_elem_props], dtype=np.int32)
+
+        # Hoek-Brown parameter preparation
+        mat_sigma_ci_arr = []
+        mat_gsi_arr = []
+        mat_disturb_factor_arr = []
+        mat_mb_arr = []
+        mat_s_arr = []
+        mat_a_arr = []
+
+        for i, ep in enumerate(active_elem_props):
+            mat = ep['material']
+            
+            # Validation Guard: Hoek-Brown + Undrained is not allowed
+            if mat.material_model == MaterialModel.HOEK_BROWN:
+                if mat.drainage_type in [DrainageType.UNDRAINED_A, DrainageType.UNDRAINED_B, DrainageType.UNDRAINED_C]:
+                    msg_err = f"ERROR: Material '{mat.name}' uses Hoek-Brown with an Undrained drainage type. Rock models only support Drained or Non-Porous conditions."
+                    log.append(msg_err)
+                    yield {"type": "log", "content": msg_err}
+                    failed_phases.add(phase.id)
+            
+            sig_ci = mat.sigma_ci or 0.0
+            gsi = mat.gsi or 0.0 
+            mi = mat.m_i or 5.0
+            D_factor = mat.disturbFactor or 0.0
+            
+            if mat.m_b is None and mat.material_model == MaterialModel.HOEK_BROWN:
+                m_b_calc = mi * np.exp((gsi - 100) / (28 - 14 * D_factor))
+                s_calc = np.exp((gsi - 100) / (9 - 3 * D_factor))
+                a_calc = 0.5 + (1/6) * (np.exp(-gsi/15) - np.exp(-20/3))
+            else:
+                m_b_calc = mat.m_b or 0.0
+                s_calc = mat.s or 0.0
+                a_calc = mat.a or 0.5
+                
+            mat_sigma_ci_arr.append(sig_ci)
+            mat_gsi_arr.append(gsi)
+            mat_disturb_factor_arr.append(D_factor)
+            mat_mb_arr.append(m_b_calc)
+            mat_s_arr.append(s_calc)
+            mat_a_arr.append(a_calc)
+
+        mat_sigma_ci_arr = np.array(mat_sigma_ci_arr)
+        mat_gsi_arr = np.array(mat_gsi_arr)
+        mat_disturb_factor_arr = np.array(mat_disturb_factor_arr)
+        mat_mb_arr = np.array(mat_mb_arr)
+        mat_s_arr = np.array(mat_s_arr)
+        mat_a_arr = np.array(mat_a_arr)
+
+        # Check if phase failed due to validation
+        if phase.id in failed_phases:
+            continue
 
         while (not is_srm and current_m_stage < 1.0) or (is_srm and current_m_stage < 100.0): 
             if should_stop and should_stop():
@@ -1010,6 +1101,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     mat_c_arr,
                     mat_phi_arr,
                     mat_su_arr,
+                    mat_sigma_ci_arr,
+                    mat_gsi_arr,
+                    mat_disturb_factor_arr,
+                    mat_mb_arr,
+                    mat_s_arr,
+                    mat_a_arr,
                     penalties_arr,
                     is_srm,
                     target_m_stage,
