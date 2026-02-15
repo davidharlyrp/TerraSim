@@ -439,8 +439,8 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
     const backgroundColor = theme === 'dark' ? "bg-slate-950" : "bg-slate-50";
     const gridColor = theme === 'dark' ? "#535c66" : "#e2e8f0";
     const gridSpacing = generalSettings.snapSpacing || 1;
-    const hideGrid = generalSettings.hideGrid || false;
-    const hideRuler = generalSettings.hideRuler || false;
+    const hideGrid = generalSettings.hideGrid;
+    const hideRuler = generalSettings.hideRuler;
 
     return (
         <div ref={containerRef} className={`w-full h-full ${backgroundColor} overflow-hidden outline-none relative`}>
@@ -448,10 +448,10 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                 <OrthographicCamera makeDefault position={[0, 0, 90]} zoom={20} />
                 <OrbitControls enableRotate={false} />
                 <ambientLight intensity={1.0} />
-                {hideGrid && (
+                {!hideGrid && (
                     <Grid position={[0, 0, -1]} rotation={[Math.PI / 2, 0, 0]} args={[500, 500]} cellColor={gridColor} sectionColor={gridColor} cellSize={gridSpacing} sectionSize={1} fadeDistance={100} />
                 )}
-                {hideRuler && (
+                {!hideRuler && (
                     <Ruler />
                 )}
 

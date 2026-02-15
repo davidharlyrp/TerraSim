@@ -206,7 +206,7 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                 </div>
                             )}
 
-                            {(edited.drainage_type === DrainageType.UNDRAINED_B || edited.drainage_type === DrainageType.UNDRAINED_C || edited.material_model === MaterialModel.MOHR_COULOMB) && (
+                            {((edited.drainage_type === DrainageType.UNDRAINED_B || edited.drainage_type === DrainageType.UNDRAINED_C) && edited.material_model === MaterialModel.MOHR_COULOMB) && (
                                 <div className="grid grid-cols-4 items-center gap-1">
                                     <span className="itemlabel col-span-2">
                                         Shear Strength, <MathRender tex="S_u" />

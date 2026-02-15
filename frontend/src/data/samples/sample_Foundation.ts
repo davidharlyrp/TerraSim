@@ -1,5 +1,5 @@
 
-import { DrainageType, MaterialModel, PhaseRequest, PhaseType, PointLoad, PolygonData, Material, WaterLevel, GeneralSettings } from '../../types';
+import { DrainageType, MaterialModel, PhaseRequest, PhaseType, PointLoad, PolygonData, Material, WaterLevel, GeneralSettings, MeshSettings } from '../../types';
 
 // Sample Materials
 export const SAMPLE_MATERIALS: Material[] = [
@@ -45,7 +45,7 @@ export const SAMPLE_MATERIALS: Material[] = [
         id: 'mat_undrained_c_clay',
         name: 'Stiff Clay (Undr C)',
         color: '#1b1ba0', // zinc-500
-        effyoungsModulus: 15000.0,
+        youngsModulus: 15000.0,
         poissonsRatio: 0.49,
         unitWeightSaturated: 15.0,
         unitWeightUnsaturated: 15.0,
@@ -212,6 +212,7 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_id: 'phase_0',
         active_polygon_indices: [0, 1, 2, 3], // Add another layer
         active_load_ids: [],
+        active_water_level_id: 'wl_default',
         reset_displacements: true,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
@@ -223,6 +224,7 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_id: 'phase_1',
         active_polygon_indices: [0, 1, 2, 3, 8],
         active_load_ids: [''], // Assuming some load ID exists
+        active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
@@ -234,6 +236,7 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_id: 'phase_2',
         active_polygon_indices: [0, 1, 2, 3, 4, 5, 8],
         active_load_ids: [''], // Assuming some load ID exists
+        active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
@@ -245,6 +248,7 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_id: 'phase_3',
         active_polygon_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
         active_load_ids: [''], // Assuming some load ID exists
+        active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
@@ -256,6 +260,7 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_id: 'phase_4',
         active_polygon_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
         active_load_ids: ['load_1'], // Assuming some load ID exists
+        active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
@@ -267,6 +272,7 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         parent_id: 'phase_5',
         active_polygon_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
         active_load_ids: ['load_1'], // Assuming some load ID exists
+        active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
@@ -280,6 +286,11 @@ export const SAMPLE_GENERAL_SETTINGS: GeneralSettings = {
     hideRuler: false,
 };
 
+export const SAMPLE_MESH_SETTINGS: MeshSettings = {
+    mesh_size: 0.5,
+    boundary_refinement_factor: 0.5,
+};
+
 export const SAMPLE_FOUNDATION = {
     name: "Foundation Sample",
     materials: SAMPLE_MATERIALS,
@@ -287,5 +298,6 @@ export const SAMPLE_FOUNDATION = {
     pointLoads: SAMPLE_POINT_LOADS,
     phases: SAMPLE_PHASES,
     waterLevels: SAMPLE_WATER_LEVELS,
-    lineLoads: []
+    lineLoads: [],
+    meshSettings: SAMPLE_MESH_SETTINGS,
 };

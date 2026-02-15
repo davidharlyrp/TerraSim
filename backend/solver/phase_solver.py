@@ -1149,12 +1149,83 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 K_global = sp.coo_matrix((K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
                 K_free = K_global[free_dofs, :][:, free_dofs]
                 
+                # === SOLVER STEP WITH DIAGNOSTICS ===
+                # 1. Check for NaNs or Infs in R_free
+                if not np.all(np.isfinite(R_free)):
+                    msg = f"Solver Error: R_free vector contains NaNs or Infs at iteration {iteration}. Physics likely exploded."
+                    log.append(msg)
+                    print(msg)
+                    yield {"type": "log", "content": msg}
+                    converged = False
+                    break
+
                 try:
+                    # 2. Solver Call
                     du_free = spsolve(K_free, R_free)
+                    
+                    if not np.all(np.isfinite(du_free)):
+                        raise ValueError("Solver returned NaNs/Infs in displacement vector.")
+                    
+                    # Check for Explosion (Huge Displacement)
+                    # Use a generous multiplier on the user limit (e.g. 100x) or a hard cap like 1e6 meters
+                    limit_val = (settings.max_displacement_limit or 10.0) * 100.0
+                    max_du = np.max(np.abs(du_free))
+                    if max_du > limit_val:
+                         raise ValueError(f"Solver instability detected: Incremental displacement {max_du:.2E} exceeds limit {limit_val:.2E}. Model is likely unstable/unconstrained.")
+
                     step_du[free_dofs] += du_free
+                    
                 except Exception as e:
-                    print(f"DEBUG: Solver error at Iter {iteration}: {str(e)}")
-                    log.append(f"Solver Error: {str(e)}")
+                    msg_err = f"Solver Error at Iter {iteration}: {str(e)}"
+                    print(f"DEBUG: {msg_err}")
+                    log.append(msg_err)
+                    yield {"type": "log", "content": msg_err}
+                    
+                    # === 3. SINGULARITY DIAGNOSTICS ===
+                    # Analyze K_free for zero rows/cols (Unconstrained DOFs)
+                    # This only catches unattached nodes. Rigid Body Motion (sliding) shows up as valid diagonals but singular matrix.
+                    try:
+                        # Check diagonal elements (detects disconnected nodes)
+                        diag = K_free.diagonal()
+                        near_zero_indices = np.where(np.abs(diag) < 1e-6)[0]
+                        
+                        diag_msg = ""
+                        if len(near_zero_indices) > 0:
+                            # Map back to Global Node IDs
+                            bad_dofs_global = free_dofs[near_zero_indices]
+                            
+                            diagnostic_msgs = []
+                            limit_reports = 5
+                            for i, bad_dof in enumerate(bad_dofs_global):
+                                if i >= limit_reports: 
+                                    diagnostic_msgs.append(f"... and {len(bad_dofs_global) - limit_reports} more.")
+                                    break
+                                
+                                node_id = bad_dof // 2
+                                axis = "X" if bad_dof % 2 == 0 else "Y"
+                                diagnostic_msgs.append(f"Node {node_id + 1} (DOF {axis}) has near-zero stiffness.")
+                            
+                            diag_msg = "Weak/Disconnect Nodes: " + "; ".join(diagnostic_msgs)
+                        
+                        full_msg = f"Analysis Failed. {diag_msg}"
+                        if not diag_msg:
+                            full_msg += " Possible Rigid Body Motion (Sliding/Rotation) due to missing boundary conditions."
+                            
+                        log.append(full_msg)
+                        yield {"type": "log", "content": full_msg}
+                        print(full_msg)
+                            
+                        # Update error message for UI
+                        phase_results.append({
+                            'phase_id': phase.id,
+                            'success': False,
+                            'displacements': [],
+                            'stresses': [],
+                            'error': f"{str(e)} \nDiagnosis: {full_msg}"
+                        })
+                    except Exception as diag_e:
+                        print(f"Diagnostics failed: {diag_e}")
+
                     converged = False
                     break
             

@@ -594,6 +594,9 @@ function MainApp() {
                 setLineLoads(sample.lineLoads || []);
                 setWaterLevels(sample.waterLevels || []);
                 setPhases(sample.phases);
+                setGeneralSettings(sample.generalSettings || SAMPLE_GENERAL_SETTINGS);
+                setSolverSettings(sample.solverSettings || SAMPLE_SOLVER_SETTINGS);
+                setMeshSettings(sample.meshSettings || SAMPLE_MESH_SETTINGS);
                 setProjectName(sample.name);
 
                 setCloudProjectId(null);

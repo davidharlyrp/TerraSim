@@ -94,6 +94,24 @@ export const MeshSidebar: React.FC<MeshSidebarProps> = ({
                             </div>
                         )}
                     </div> */}
+
+                    {/* select displacement point (node) or stress point (GP) */}
+                    {/* <div className='p-2 border-t border-slate-200 dark:border-slate-700'>
+                        <div className="label2">Select Displacement Point</div>
+                        <div className="p-2">
+                            <button
+                                onClick={() => { }}
+                                className="cursor-pointer w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs p-2 rounded outline-none focus:border-blue-500 transition-colors">
+                                Pick Node
+                            </button>
+                        </div>
+                        {selectedNode && (
+                            <div className="p-2">
+                                <div className="text-xs text-slate-600 dark:text-slate-400">Selected Node:</div>
+                                <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">{selectedNode}</div>
+                            </div>
+                        )}
+                    </div> */}
                 </div>
             )}
         </div>
