@@ -1,4 +1,4 @@
-# 05. Struktur Output dan Hasil Analisis
+# 07. Struktur Output (NPY Files)
 
 Dokumen ini menjelaskan format data yang dikembalikan oleh solver ke frontend setelah analisis selesai.
 

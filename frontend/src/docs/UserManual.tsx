@@ -1,5 +1,5 @@
 import React from 'react';
-import { Folder, Pen, Square, ArrowDown, ArrowDownToDot, ArrowDownToLine, ChartNoAxesColumnIncreasing, ChartNoAxesColumnDecreasing } from 'lucide-react';
+import { Folder, Pen, Square, ArrowDown, ArrowDownToDot, ArrowDownToLine, ChartNoAxesColumnIncreasing, ChartNoAxesColumnDecreasing, TestTube } from 'lucide-react';
 
 const Structure = {
     Input: {
@@ -7,11 +7,12 @@ const Structure = {
         desc: "Define the physical boundaries of your soil model. Draw polygons to represent different soil layers or structure and put load as an external load that would be applied to the model.",
         subtitle: [
             {
-                title: "1.1 Geometry & Load",
+                title: "1.1 Geometry, Load & Structural Components",
                 desc: "Define the physical boundaries of your soil model. Draw polygons to represent different soil layers or structure and put load as an external load that would be applied to the model.",
                 items: [
                     "1.1.1 Geometry",
-                    "1.1.2 Load"
+                    "1.1.2 Load",
+                    "1.1.3 Structural Components"
                 ]
             },
             {
@@ -59,9 +60,9 @@ const Structure = {
                 desc: "Define the type of phase that will be applied on your model.",
                 items: [
                     "3.1.1 k0 Procedure",
-                    "3.1.2 Gravity Loading",
-                    "3.1.3 Plastic Analysis",
-                    "3.1.4 Safety Analysis"
+                    // "3.1.2 Gravity Loading",
+                    "3.1.2 Plastic Analysis",
+                    "3.1.3 Safety Analysis"
                 ]
             },
             {
@@ -69,7 +70,7 @@ const Structure = {
                 desc: "Define the construction sequence and component state for each phase.",
                 items: [
                     "3.2.1 Create Phase",
-                    "3.2.2 Component Activation (Polygons, Loads)",
+                    "3.2.2 Component Activation (Polygons, Loads, Structures)",
                     "3.2.3 Water Level Selection",
                     "3.2.4 Material Overrides"
                 ]
@@ -115,12 +116,29 @@ const Structure = {
         subtitle: [
             {
                 title: "5.1 Header Controls",
-                desc: "Control your project files and global interaction from the top bar.",
+                desc: "Control global interaction from the top bar.",
                 items: [
                     "5.1.1 Project Name",
-                    "5.1.2 Save & Load (.tsm)",
-                    "5.1.3 Cloud Sync",
-                    "5.1.4 Feedback & Documentation"
+                    "5.1.2 Feedback",
+                    "5.1.3 Load Sample Project",
+                    "5.1.4 Notifications & Updates",
+                    "5.1.5 Documentation",
+                    "5.1.6 Application Settings",
+                    "5.1.7 Dark Mode",
+                    "5.1.8 User Panel"
+                ]
+            },
+            {
+                title: "5.2 User Panel",
+                desc: "Control your project files.",
+                items: [
+                    "5.2.1 New Project",
+                    "5.2.2 Download Project",
+                    "5.2.3 Save Project on Cloud",
+                    "5.2.4 Save As new Project",
+                    "5.2.5 Load Project from Cloud",
+                    "5.2.6 Open Project",
+                    "5.2.7 Log Out"
                 ]
             },
             {
@@ -279,6 +297,37 @@ const Phase1Content = () => (
                             </li>
                         </ul>
                     </div>
+
+                    {/* Structural Components */}
+                    <div className="pl-2 flex flex-col gap-2 mb-4">
+                        <h3 className="text-xl font-bold text-white leading-none mb-2">{Structure.Input.subtitle[0].items[2]}</h3>
+                        <p className="description2">
+                            You can define the structural components that will be applied to the geometry that you have created.
+                            TerraSim currently supports only one type of structural components, embedded beam row (EBR).
+                        </p>
+                        <ul className="pl-6 space-y-2 list-disc list-outside">
+                            <li className='font-semibold'>Embedded Beam Row (EBR)
+                                <div>
+                                    <p className='description2'>User can create embedded beam row by using tools in the toolbar. The embedded beam row is defined as a structural component that would be applied to a EBR along it spacing direction (z direction of the canvas) for plane strain.</p>
+                                    <button
+                                        title="Draw Embedded Beam Row"
+                                        className={`cursor-pointer w-10 relative py-2 px-2 my-4 text-sm text-white transition-all border h-full rounded-lg text-slate-400 border-white hover:text-slate-300`}
+                                    >
+                                        <div className="relative">
+                                            <TestTube />
+                                            <Pen className='absolute -top-1 -right-1 w-3 h-3' />
+                                        </div>
+                                    </button>
+                                    <p className='description2'>
+                                        You can start create a embedded beam row, and to create a embedded beam row you need to click on the button and then click on the canvas to define first point of the EBR and click on the canvas to define second point of the EBR to define the line of the EBR.
+                                    </p>
+                                    <p className='description2'>
+                                        After you define where the EBR will be applied, it will be shown on the canvas and you can define the material properties of the EBR on sidebar.
+                                    </p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
             </>
             {/* Water Table */}
@@ -330,12 +379,15 @@ const Phase1Content = () => (
                                 We provide for multiple material properties that you can use on your soil model to represent different type of soil or material.
                                 You can define the material properties on the sidebar by selecting the material properties from the dropdown menu. there are 2 type of material properties that you can use on your soil model, they are:
                             </p>
-                            <ul className="pl-6 space-y-2 list-disc list-outside">
+                            <ul className="pl-6 space-y-2 list-disc list-outside mb-4">
                                 <li>
                                     <strong>Linear Elastic</strong>
                                 </li>
                                 <li>
                                     <strong>Mohr-Coulomb</strong>
+                                </li>
+                                <li>
+                                    <strong>Hoek-Brown</strong>
                                 </li>
                             </ul>
                             <p className='description2'>
@@ -457,22 +509,22 @@ const Phase3Content = () => (
                                 <strong>K0 Procedure:</strong> Used to generate initial stresses for horizontal ground surfaces with horizontal soil layers. It directly calculates vertical and horizontal stresses based on the weight of the soil and the Coefficient of Lateral Earth Pressure (K0).
                             </p>
                         </div>
-                        <div className="mb-4">
+                        {/* <div className="mb-4">
                             <h3 className="text-xl font-bold text-white leading-none mb-2">{Structure.Staging.subtitle[0].items[1]}</h3>
                             <p className="description2">
                                 <strong>Gravity Loading:</strong> Used for non-horizontal ground surfaces (slopes) to generate initial stresses. It applies the soil weight as a load and calculates the resulting stress state using plastic analysis.
                             </p>
-                        </div>
+                        </div> */}
                         <div className="mb-4">
-                            <h3 className="text-xl font-bold text-white leading-none mb-2">{Structure.Staging.subtitle[0].items[2]}</h3>
+                            <h3 className="text-xl font-bold text-white leading-none mb-2">{Structure.Staging.subtitle[0].items[1]}</h3>
                             <p className="description2">
                                 <strong>Plastic Analysis:</strong> Standard elastoplastic analysis for construction stages. Used for excavation, loading, embankment, etc. It solves for equilibrium under the applied changes.
                             </p>
                         </div>
                         <div className="mb-4">
-                            <h3 className="text-xl font-bold text-white leading-none mb-2">{Structure.Staging.subtitle[0].items[3]}</h3>
+                            <h3 className="text-xl font-bold text-white leading-none mb-2">{Structure.Staging.subtitle[0].items[2]}</h3>
                             <p className="description2">
-                                <strong>Safety Analysis (SRM):</strong> Uses the Strength Reduction Method to calculate the global Factor of Safety (FoS). It progressively reduces the strength parameters (c and phi) of the soil until failure occurs.
+                                <strong>Safety Analysis (SRM):</strong> Uses the Strength Reduction Method to calculate the global Factor of Safety (FoS). It progressively reduces the strength parameters (c and phi for Mohr-Coulomb) of the soil until failure occurs.
                             </p>
                         </div>
                     </div>
@@ -502,6 +554,7 @@ const Phase3Content = () => (
                             <ul className="pl-6 space-y-1 list-disc list-outside description2 mt-2">
                                 <li><strong>Polygons:</strong> Uncheck to simulate excavation. Check to simulate backfilling or construction of embankments.</li>
                                 <li><strong>Loads:</strong> Check to apply external loads (Point or Line loads) in this phase.</li>
+                                <li><strong>Structures:</strong> Check to activate or deactivate structures in this phase.</li>
                             </ul>
                         </div>
                         <div className="mb-4">
@@ -576,7 +629,7 @@ const Phase4Content = () => (
                         <p className="description2">
                             After the analysis (or during a live run), you can switch between several output views to inspect different physical quantities:
                         </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
+                        <div className="flex flex-col gap-6 mt-2">
                             <div className="space-y-3">
                                 <h3 className="text-sm font-bold text-white uppercase tracking-widest">Deformation</h3>
                                 <ul className="pl-6 space-y-1 list-disc list-outside description2">
@@ -642,44 +695,61 @@ const Phase5Content: React.FC = () => (
                     </p>
                 </div>
                 <div className="flex flex-col ml-8 gap-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pl-2">
-                        <div className="space-y-4">
-                            <div>
-                                <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[0]}</h3>
-                                <p className="description2">
-                                    You can change your project name directly in the header by clicking on the text next to the logo. This name is used when saving files.
-                                </p>
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[1]}</h3>
-                                <p className="description2">
-                                    <strong>Save:</strong> Exports your entire project (geometry, materials, phases, and results) into a <code>.tsm</code> file.
-                                    <br />
-                                    <strong>Load:</strong> Re-imports a <code>.tsm</code> file to continue your work.
-                                </p>
-                            </div>
+                    <div className="flex flex-col gap-8 pl-2">
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[0]}</h3>
+                            <p className="description2">
+                                You can change your project name directly in the header by clicking on the text next to the logo. This name is used when saving files.
+                            </p>
                         </div>
-                        <div className="space-y-4">
-                            <div>
-                                <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[2]}</h3>
-                                <p className="description2">
-                                    <strong>Cloud Save/Load:</strong> Sync your project to your account. This allows you to access your simulations from any device and ensures your data is backed up.
-                                </p>
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[3]}</h3>
-                                <p className="description2">
-                                    <strong>Feedback:</strong> Use the messaging icon to report bugs or suggest features.
-                                    <br />
-                                    <strong>Software Updates:</strong> The bell icon notifies you of new versions and features added to TerraSim.
-                                </p>
-                            </div>
+
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[1]}</h3>
+                            <p className="description2">
+                                Use the messaging icon to report bugs or suggest features.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[2]}</h3>
+                            <p className="description2">
+                                You can load sample projects from the TerraSim library.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[3]}</h3>
+                            <p className="description2">
+                                The bell icon notifies you of new versions and features added to TerraSim.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[4]}</h3>
+                            <p className="description2">
+                                Open the Documentation tab to learn more about TerraSim features and capabilities.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[5]}</h3>
+                            <p className="description2">
+                                Open App Settings panel where you can adjust your simulation environment.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[6]}</h3>
+                            <p className="description2">
+                                Switch between light and dark modes to reduce eye strain.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[0].items[7]}</h3>
+                            <p className="description2">
+                                Open the user panel to manage your file projects.
+                            </p>
                         </div>
                     </div>
                 </div>
             </>
 
-            {/* Application Settings */}
+            {/* User Panel */}
             <>
                 <div className="flex-1 ml-4 mb-4 space-y-4 py-2 border-b border-gray-500">
                     <h2 className="text-2xl font-black text-white">{Structure.Project.subtitle[1].title}</h2>
@@ -688,19 +758,80 @@ const Phase5Content: React.FC = () => (
                     </p>
                 </div>
                 <div className="flex flex-col ml-8 gap-4">
+                    <div className="flex flex-col gap-8 pl-2">
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[0]}</h3>
+                            <p className="description2">
+                                You can reset your project to its initial state and clear all results including geometry and material properties.
+                            </p>
+                        </div>
+
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[1]}</h3>
+                            <p className="description2">
+                                You can download your project as a .tsm file to save it locally.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[2]}</h3>
+                            <p className="description2">
+                                You can save your projects on the cloud to access them from any device.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[3]}</h3>
+                            <p className="description2">
+                                Same as Save project on cloud, but it will save as a new project.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[4]}</h3>
+                            <p className="description2">
+                                You can load your projects from the cloud to access them from any device.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[5]}</h3>
+                            <p className="description2">
+                                You can load your .tsm file project that you saved/downloaded locally.
+                            </p>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">{Structure.Project.subtitle[1].items[6]}</h3>
+                            <p className="description2">
+                                You can logout from your account.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </>
+
+            {/* Application Settings */}
+            <>
+                <div className="flex-1 ml-4 mb-4 space-y-4 py-2 border-b border-gray-500">
+                    <h2 className="text-2xl font-black text-white">{Structure.Project.subtitle[2].title}</h2>
+                    <p className="text-lg text-slate-400 leading-relaxed max-w-3xl">
+                        {Structure.Project.subtitle[2].desc}
+                    </p>
+                </div>
+                <div className="flex flex-col ml-8 gap-4">
                     <div className="pl-2 space-y-8">
                         <div>
-                            <h3 className="text-xl font-bold text-white mb-4">{Structure.Project.subtitle[1].items[0]}</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                                    <h4 className="font-bold text-white mb-1">Dark Mode</h4>
-                                    <p className="text-xs text-slate-400">Toggles the canvas between a dark and light background for better visibility.</p>
+                            <h3 className="text-xl font-bold text-white mb-4">{Structure.Project.subtitle[2].items[0]}</h3>
+                            <div className="flex flex-col gap-4">
+                                <div className="">
+                                    <h4 className="font-bold text-white mb-1">Hide Grid</h4>
+                                    <p className="text-xs text-slate-400">Hides the grid lines for a cleaner view.</p>
                                 </div>
-                                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                <div className="">
+                                    <h4 className="font-bold text-white mb-1">Hide Rulers</h4>
+                                    <p className="text-xs text-slate-400">Hides the rulers that show the dimensions of the canvas.</p>
+                                </div>
+                                <div className="">
                                     <h4 className="font-bold text-white mb-1">Snap to Grid</h4>
                                     <p className="text-xs text-slate-400">Forces drawing tools to align with the grid intersections, ensuring precise geometry.</p>
                                 </div>
-                                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                <div className="">
                                     <h4 className="font-bold text-white mb-1">Grid Spacing</h4>
                                     <p className="text-xs text-slate-400">Sets the distance between grid lines in meters (default is 1.0m).</p>
                                 </div>
@@ -708,21 +839,21 @@ const Phase5Content: React.FC = () => (
                         </div>
 
                         <div>
-                            <h3 className="text-xl font-bold text-white mb-4">{Structure.Project.subtitle[1].items[1]}</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                            <h3 className="text-xl font-bold text-white mb-4">{Structure.Project.subtitle[2].items[1]}</h3>
+                            <div className="flex flex-col gap-4">
+                                <div className="">
                                     <h4 className="font-bold text-white mb-1 text-sm">Tolerance (&epsilon;)</h4>
                                     <p className="text-[11px] text-slate-400">The convergence criterion for iterations. Smaller values increase accuracy but may slow down the solver.</p>
                                 </div>
-                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                <div className="">
                                     <h4 className="font-bold text-white mb-1 text-sm">Max Iterations</h4>
                                     <p className="text-[11px] text-slate-400">The maximum number of attempts the solver will make to converge within a single step.</p>
                                 </div>
-                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                <div className="">
                                     <h4 className="font-bold text-white mb-1 text-sm">Initial Step Size</h4>
                                     <p className="text-[11px] text-slate-400">The load increment fraction applied at the beginning of a plastic analysis phase.</p>
                                 </div>
-                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                <div className="">
                                     <h4 className="font-bold text-white mb-1 text-sm">Desired Iterations</h4>
                                     <p className="text-[11px] text-slate-400">The solver adjusts future step sizes to try and reach convergence within this iteration range (e.g., 3-7 iterations).</p>
                                 </div>

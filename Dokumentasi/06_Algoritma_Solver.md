@@ -1,4 +1,4 @@
-# 04. Algoritma Solver (Matrix Assembly & Nonlinear Loop)
+# 06. Algoritma Solver (Matrix Assembly & Nonlinear Loop)
 
 Dokumen ini menjelaskan "Otak" dari solver: bagaimana persamaan global disusun dan diselesaikan secara iteratif.
 

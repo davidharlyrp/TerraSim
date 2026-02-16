@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Material, MaterialModel, DrainageType } from '../types';
 import { MathRender } from './Math';
+import { YieldSurfaceChart } from './YieldSurfaceChart';
 
 interface MaterialModalProps {
     material: Material;
@@ -13,10 +14,10 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
 
     return (
         <div className="fixed inset-0 w-screen h-screen bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-xl w-full max-w-[800px] max-h-[70vh] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 shadow-2xl text-slate-900 dark:text-white transition-colors">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-xl w-full max-w-[1200px] max-h-[90vh] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 shadow-2xl text-slate-900 dark:text-white transition-colors">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-2">Edit Material: <span className="text-gray-600 dark:text-gray-400">{edited.name}</span></h3>
 
-                <div className="grid md:grid-cols-2 grid-cols-1 gap-6">
+                <div className="grid lg:grid-cols-3 md:grid-cols-2 grid-cols-1 gap-6">
                     <div className='border-r border-slate-200 dark:border-slate-800 pr-2'>
                         <div className='titlelabel mt-2 border-b border-slate-200 dark:border-slate-800 pb-1'>
                             General Information
@@ -326,6 +327,26 @@ export const MaterialModal: React.FC<MaterialModalProps> = ({ material, onSave, 
                                         <input type="number" value={edited.a?.toFixed(4) || ""} disabled className="input bg-slate-50 dark:bg-slate-800" />
                                     </div>
                                 </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="lg:border-l border-slate-200 dark:border-slate-800 lg:pl-6">
+                        <div className='titlelabel mt-2 border-b border-slate-200 dark:border-slate-800 pb-1'>
+                            Visualization
+                        </div>
+                        {edited.material_model !== MaterialModel.LINEAR_ELASTIC && (
+                            <YieldSurfaceChart material={edited} />
+                        )}
+
+                        <div className="mt-6 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-800/50 p-4 rounded-lg border border-slate-100 dark:border-slate-800">
+                            <p className="font-semibold mb-1">About Failure Envelope:</p>
+                            {edited.material_model === MaterialModel.MOHR_COULOMB ? (
+                                <p>The Mohr-Coulomb failure envelope represents the threshold for shear failure in soil <MathRender tex="\tau = c + \sigma \tan \phi" />. Points above the line represent failure states.</p>
+                            ) : edited.material_model === MaterialModel.HOEK_BROWN ? (
+                                <p>The curved Hoek-Brown failure envelope is specifically designed for rock masses, representing the shear strength threshold in <MathRender tex="\tau - \sigma" /> space.</p>
+                            ) : (
+                                <p>Visualization is not applicable for the selected model.</p>
                             )}
                         </div>
                     </div>

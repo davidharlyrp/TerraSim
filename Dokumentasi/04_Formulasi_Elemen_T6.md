@@ -1,4 +1,4 @@
-# 02. Formulasi Elemen T6 (Triangular 6-Node)
+# 04. Formulasi Elemen T6 (Triangular 6-Node)
 
 Dokumen ini menjelaskan implementasi elemen hingga (Finite Element) yang digunakan dalam solver, yaitu elemen segitiga 6-titik (T6) dengan interpolasi kuadratik.
 
@@ -94,7 +94,7 @@ Diselesaikan dengan **Integrasi Gauss 3-Titik**:
 $$ K_{el} \approx \sum_{g=1}^{3} (B_g^T D B_g) \cdot \det(J)_g \cdot w_g $$
 
 *   $B_g$: Matriks B dievaluasi di titik Gauss.
-*   $D$: Matriks Konstitutif Material. Matriks ini mendefinisikan hubungan antara "Stress" dan "Strain" ($\sigma = D \epsilon$). Untuk material elastis, $D$ berisi properti kekakuan tanah seperti Modulus Young dan Poisson's Ratio. (Detail rumus ada di [03_Model_Konstitutif_dan_Drainase.md](file:///e:/Software/New%20folder/TerraSim/Dokumentasi/03_Model_Konstitutif_dan_Drainase.md)).
+*   $D$: Matriks Konstitutif Material. Matriks ini mendefinisikan hubungan antara "Stress" dan "Strain" ($\sigma = D \epsilon$). Untuk material elastis, $D$ berisi properti kekakuan tanah seperti Modulus Young dan Poisson's Ratio. (Detail rumus ada di [05_Model_Konstitutif_dan_Drainase.md](file:///e:/Software/New%20folder/TerraSim/Dokumentasi/05_Model_Konstitutif_dan_Drainase.md)).
 *   $\det(J)_g$: Determinan Jacobian (transformasi area dari natural ke fisik).
 *   $w_g$: Bobot integrasi Gauss ($1/6$ untuk setiap titik).
 

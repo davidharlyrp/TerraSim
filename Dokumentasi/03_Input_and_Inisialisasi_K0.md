@@ -1,4 +1,4 @@
-# 01. Input dan Inisialisasi (K0 Procedure)
+# 03. Input dan Inisialisasi (K0 Procedure)
 
 Dokumen ini menjelaskan bagaimana solver menerima input, memproses geometri mesh, dan melakukan inisialisasi tegangan awal (Initial Stress) menggunakan prosedur K0.
 
@@ -119,4 +119,4 @@ Meskipun K0 adalah inisialisasi tegangan, solver menggunakan parameter dari mode
     *   Jika user mengisi kolom `K0_x` pada tabel material, solver akan mengabaikan formula otomatis dan menggunakan nilai input tersebut secara langsung.
 
 ---
-*Lanjut ke Dokumen 03 untuk penanganan Material Model saat proses iterasi plastis.*
+*Lanjut ke Dokumen 05 untuk penanganan Material Model saat proses iterasi plastis.*

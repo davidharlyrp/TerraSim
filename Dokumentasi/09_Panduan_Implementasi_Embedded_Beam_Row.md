@@ -1,4 +1,4 @@
-# 07. Panduan Implementasi: Embedded Beam Row (Pile/Anchor)
+# 09. Panduan Implementasi Embedded Beam Row (EBR)
 
 Dokumen ini menjelaskan teori dan langkah-langkah implementasi fitur **Embedded Beam Row** (EBR) ke dalam TerraSim. Fitur ini digunakan untuk memodelkan struktur pondasi tiang (pile), anchor, atau rock bolt yang berinteraksi dengan massa tanah tanpa perlu menyesuaikan mesh tanah (mesh-independent).
 

@@ -1,4 +1,4 @@
-# 06. Panduan Pengembangan: Model Material Hoek-Brown (Rock)
+# 08. Panduan Implementasi Hoek-Brown (Numba-Accelerated)
 
 Dokumen ini berisi panduan teknis untuk mengimplementasikan model konstitutif **Hoek-Brown** ke dalam TerraSim. Model ini sangat penting untuk simulasi mekanika batuan.
 

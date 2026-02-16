@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
-import { ChevronRight, Menu, X, BookOpen, User, ArrowLeft } from 'lucide-react';
+import { ChevronRight, Menu, X, BookOpen, User, ArrowLeft, FunctionSquare } from 'lucide-react';
 import { APP_VERSION } from '../version';
 
 export const DocumentationLayout: React.FC = () => {
@@ -17,7 +17,7 @@ export const DocumentationLayout: React.FC = () => {
     const navItems = [
         { path: 'introduction', label: 'Introduction', icon: <BookOpen className="w-4 h-4" /> },
         { path: 'user-manual', label: 'User Manual', icon: <User className="w-4 h-4" /> },
-        // { path: 'scientific-reference', label: 'Scientific Reference', icon: <FunctionSquare className="w-4 h-4" /> },
+        { path: 'scientific-reference', label: 'Scientific Reference', icon: <FunctionSquare className="w-4 h-4" /> },
     ];
 
     return (

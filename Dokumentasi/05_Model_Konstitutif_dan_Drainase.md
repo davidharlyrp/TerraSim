@@ -1,4 +1,4 @@
-# 03. Model Konstitutif Material dan Tipe Drainase
+# 05. Model Konstitutif Material dan Tipe Drainase
 
 Dokumen ini menjelaskan bagaimana solver menangani hubungan tegangan-regangan ($\sigma - \epsilon$), plastisitas Mohr-Coulomb, dan perilaku drainase air pori.
 
