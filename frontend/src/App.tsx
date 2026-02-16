@@ -15,7 +15,7 @@ import { InputSidebar } from './component/InputSidebar';
 import { MeshSidebar } from './component/MeshSidebar';
 import { StagingSidebar } from './component/StagingSidebar';
 import { ResultSidebar } from './component/ResultSidebar';
-import { DEFAULT_PHASES, DEFAULT_MATERIALS, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS, DEFAULT_BEAM_MATERIALS } from './sample_data';
+import { DEFAULT_PHASES, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS } from './sample_data';
 import { SampleManifest } from './data/samples';
 import { api, ApiError } from './api';
 import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel, EmbeddedBeam, EmbeddedBeamMaterial } from './types';
@@ -50,8 +50,8 @@ function MainApp() {
     const [isSampleGalleryOpen, setIsSampleGalleryOpen] = useState(false);
 
     // 2. Data State
-    const [materials, setMaterials] = useState<Material[]>(DEFAULT_MATERIALS);
-    const [beamMaterials, setBeamMaterials] = useState<EmbeddedBeamMaterial[]>(DEFAULT_BEAM_MATERIALS); // NEW
+    const [materials, setMaterials] = useState<Material[]>([]);
+    const [beamMaterials, setBeamMaterials] = useState<EmbeddedBeamMaterial[]>([]); // NEW
     const [polygons, setPolygons] = useState<PolygonData[]>([]);
     const [pointLoads, setPointLoads] = useState<PointLoad[]>([]);
     const [lineLoads, setLineLoads] = useState<LineLoad[]>([]);
@@ -501,15 +501,20 @@ function MainApp() {
                 setConfirmConfig(prev => ({ ...prev, isOpen: false }));
 
                 // Reset to initial state
-                // Reset to initial state
-                setMaterials(DEFAULT_MATERIALS);
-                setBeamMaterials([]); // NEW
+                // materials
+                setMaterials([]);
+                setBeamMaterials([]);
+                // polygons
                 setPolygons([]);
+                // loads
                 setPointLoads([]);
                 setLineLoads([]);
                 setWaterLevels([]);
-                setEmbeddedBeams([]); // NEW
+                // embedded beams
+                setEmbeddedBeams([]);
+                // phases
                 setPhases(DEFAULT_PHASES);
+                // settings
                 setGeneralSettings(SAMPLE_GENERAL_SETTINGS);
                 setSolverSettings(SAMPLE_SOLVER_SETTINGS);
                 setMeshSettings(SAMPLE_MESH_SETTINGS);

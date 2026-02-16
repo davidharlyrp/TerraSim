@@ -1,34 +1,7 @@
 
-import { DrainageType, MaterialModel, PhaseRequest, PhaseType, MeshSettings, Material, SolverSettings, EmbeddedBeamMaterial } from './types';
+import { PhaseRequest, PhaseType, MeshSettings, SolverSettings } from './types';
 
 // Default Data for New Project
-export const DEFAULT_MATERIALS: Material[] = [
-    {
-        id: 'mat_default',
-        name: 'Soil 1',
-        color: '#94a3b8', // slate-400
-        effyoungsModulus: 10000,
-        poissonsRatio: 0.3,
-        unitWeightUnsaturated: 18,
-        material_model: MaterialModel.MOHR_COULOMB,
-        drainage_type: DrainageType.DRAINED
-    }
-];
-
-export const DEFAULT_BEAM_MATERIALS: EmbeddedBeamMaterial[] = [
-    {
-        id: 'bmat_default',
-        name: 'Standard Pile',
-        color: '#f59e0b', // amber-500
-        youngsModulus: 30000000,
-        crossSectionArea: 0.2,
-        momentOfInertia: 0.005,
-        unitWeight: 7.85,
-        spacing: 2.0,
-        skinFrictionMax: 100,
-        tipResistanceMax: 500
-    }
-];
 
 export const DEFAULT_PHASES: PhaseRequest[] = [
     {
