@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { Ruler } from './Ruler';
 import { useTheme } from '../context/ThemeContext';
 import { Trash } from 'lucide-react';
-import { PolygonData, PointLoad, Material, GeneralSettings, LineLoad, PhaseType } from '../types';
+import { PolygonData, PointLoad, Material, GeneralSettings, LineLoad, PhaseType, EmbeddedBeam, EmbeddedBeamMaterial } from '../types';
 
 interface InputCanvasProps {
     polygons: PolygonData[];
@@ -17,19 +17,25 @@ interface InputCanvasProps {
     activePolygonIndices?: number[];
     activeLoadIds?: string[];
     activeWaterLevelId?: string; // NEW
+    activeBeamIds?: string[]; // NEW
+    embeddedBeams?: EmbeddedBeam[]; // NEW
+    beamMaterials?: EmbeddedBeamMaterial[]; // NEW
     drawMode: string | null;
     onAddPolygon: (vertices: { x: number, y: number }[]) => void;
     onAddPointLoad: (x: number, y: number) => void;
     onAddLineLoad: (x1: number, y1: number, x2: number, y2: number) => void;
     onAddWaterLevel: (vertices: { x: number, y: number }[]) => void;
+    onAddEmbeddedBeam?: (points: { x: number, y: number }[]) => void; // NEW
     onCancelDraw: () => void;
     selectedEntity: { type: string, id: string | number } | null;
     onSelectEntity: (selection: { type: string, id: string | number } | null) => void;
     onDeletePolygon: (idx: number) => void;
     onDeleteLoad: (id: string) => void;
     onDeleteWaterLevel: (id: string) => void; // CHANGED
+    onDeleteEmbeddedBeam?: (id: string) => void; // NEW
     onUpdatePolygon?: (idx: number, data: Partial<PolygonData>) => void;
-    onToggleActive?: (type: 'polygon' | 'load', id: string | number) => void; // Maybe add water_level later
+    onUpdateEmbeddedBeam?: (id: string, data: Partial<EmbeddedBeam>) => void; // NEW
+    onToggleActive?: (type: 'polygon' | 'load' | 'embeddedBeam', id: string | number) => void;
     onUpdateWaterLevel?: (index: number, wl: any) => void; // NEW
     activeTab?: WizardTab;
     currentPhaseType?: PhaseType;
@@ -190,6 +196,37 @@ const LineLoadMarker = ({ load, isSelected, isActive, onSelect, onContextMenu }:
 };
 
 
+
+const EmbeddedBeamMarker = ({ beam, beamMaterials, isSelected, isActive, onSelect, onContextMenu }: {
+    beam: EmbeddedBeam,
+    beamMaterials: EmbeddedBeamMaterial[],
+    isSelected: boolean,
+    isActive: boolean,
+    onSelect: () => void,
+    onContextMenu: (x: number, y: number) => void
+}) => {
+    const mat = beamMaterials.find(m => m.id === beam.materialId);
+    const color = isSelected ? "#f59e0b" : (isActive ? (mat?.color || "#f59e0b") : "#94a3b8");
+    // const color = isSelected ? "#3b82f6" : (isActive ? (mat?.color || "#f59e0b") : "#94a3b8"); // Alternative
+
+    const pts = beam.points.map(p => new THREE.Vector3(p.x, p.y, 8));
+
+    return (
+        <group
+            onClick={(e) => { e.stopPropagation(); onSelect(); }}
+            onContextMenu={(e) => { e.nativeEvent.preventDefault(); e.stopPropagation(); onContextMenu(e.nativeEvent.clientX, e.nativeEvent.clientY); }}
+        >
+            <Line points={pts} color={color} lineWidth={isSelected ? 4 : 2} frustumCulled={false} dashed={!isActive} />
+            {pts.map((p, i) => (
+                <mesh key={i} position={p}>
+                    <circleGeometry args={[0.08, 16]} />
+                    <meshBasicMaterial color={color} />
+                </mesh>
+            ))}
+        </group>
+    );
+};
+
 // --- CURSOR TRACKER ---
 const CursorTracker = ({ onMouseMove, generalSettings }: { onMouseMove: (x: number, y: number) => void, generalSettings: GeneralSettings }) => {
     const { camera, mouse, raycaster } = useThree();
@@ -225,12 +262,13 @@ const CursorTracker = ({ onMouseMove, generalSettings }: { onMouseMove: (x: numb
 
 
 // --- DRAWING MANAGER ---
-const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onAddWaterLevel, onCancel, generalSettings }: {
+const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onAddWaterLevel, onAddEmbeddedBeam, onCancel, generalSettings }: {
     mode: string | null;
     onAddPolygon: (pts: { x: number, y: number }[]) => void;
     onAddPointLoad: (x: number, y: number) => void;
     onAddLineLoad: (x1: number, y1: number, x2: number, y2: number) => void;
     onAddWaterLevel: (vertices: { x: number, y: number }[]) => void;
+    onAddEmbeddedBeam?: (points: { x: number, y: number }[]) => void;
     onCancel: () => void;
     generalSettings: GeneralSettings;
 }) => {
@@ -256,10 +294,10 @@ const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onA
             return new THREE.Vector3(
                 Math.round(target.x / s) * s,
                 Math.round(target.y / s) * s,
-                0.4
+                8.0
             );
         }
-        return new THREE.Vector3(target.x, target.y, 0.4);
+        return new THREE.Vector3(target.x, target.y, 8.0);
     }, [camera, mouse, raycaster, generalSettings]);
 
     useEffect(() => {
@@ -291,6 +329,14 @@ const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onA
                 } else {
                     const p1 = tempPoints[0];
                     onAddLineLoad(p1.x, p1.y, pos.x, pos.y);
+                    setTempPoints([]);
+                }
+            } else if (mode === 'embedded_beam') {
+                if (tempPoints.length === 0) {
+                    setTempPoints([pos]);
+                } else {
+                    const p1 = tempPoints[0];
+                    if (onAddEmbeddedBeam) onAddEmbeddedBeam([{ x: p1.x, y: p1.y }, { x: pos.x, y: pos.y }]);
                     setTempPoints([]);
                 }
             } else if ((mode === 'polygon' || mode === 'water_level') && tempPoints.length >= 3) {
@@ -338,7 +384,7 @@ const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onA
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('keydown', handleKeys);
         };
-    }, [mode, getWorldPos, tempPoints, onAddPolygon, onAddPointLoad, onAddWaterLevel, onCancel]);
+    }, [mode, getWorldPos, tempPoints, onAddPolygon, onAddPointLoad, onAddWaterLevel, onAddEmbeddedBeam, onCancel]);
 
     if (!mode) return null;
 
@@ -352,7 +398,9 @@ const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onA
             linePoints.push(new THREE.Vector3(p1.x, p1.y, 0.4));
         } else if (mode === 'line_load' && tempPoints.length === 1) {
             linePoints.push(previewPoint);
-        } else if (mode !== 'rectangle' && mode !== 'line_load') {
+        } else if (mode === 'embedded_beam' && tempPoints.length === 1) {
+            linePoints.push(previewPoint);
+        } else if (mode !== 'rectangle' && mode !== 'line_load' && mode !== 'embedded_beam') {
             linePoints.push(previewPoint);
         }
     }
@@ -379,10 +427,10 @@ const DrawingManager = ({ mode, onAddPolygon, onAddPointLoad, onAddLineLoad, onA
 };
 
 export const InputCanvas: React.FC<InputCanvasProps> = ({
-    polygons, pointLoads, lineLoads, materials, water_levels,
-    activePolygonIndices, activeLoadIds, activeWaterLevelId,
-    drawMode, onAddPolygon, onAddPointLoad, onAddLineLoad, onAddWaterLevel, onCancelDraw,
-    selectedEntity, onSelectEntity, onDeletePolygon, onDeleteLoad, onDeleteWaterLevel, onToggleActive,
+    polygons, pointLoads, lineLoads, materials, water_levels, embeddedBeams, beamMaterials, // NEW
+    activePolygonIndices, activeLoadIds, activeWaterLevelId, activeBeamIds, // NEW
+    drawMode, onAddPolygon, onAddPointLoad, onAddLineLoad, onAddWaterLevel, onAddEmbeddedBeam, onCancelDraw, // NEW
+    selectedEntity, onSelectEntity, onDeletePolygon, onDeleteLoad, onDeleteWaterLevel, onDeleteEmbeddedBeam, onToggleActive,
     onUpdatePolygon,
     activeTab,
     currentPhaseType,
@@ -391,7 +439,7 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
     onOverrideMaterial
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, target: { type: 'polygon' | 'load', id: string | number } } | null>(null);
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, target: { type: 'polygon' | 'load' | 'embeddedBeam', id: string | number } } | null>(null);
     const [cursorPos, setCursorPos] = useState<{ x: number, y: number } | null>(null);
 
     // Handling Delete Key for canvas-based deletion
@@ -407,6 +455,8 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                     onDeleteLoad(selectedEntity.id as string);
                 } else if (selectedEntity.type === 'water_level') {
                     onDeleteWaterLevel(selectedEntity.id as string);
+                } else if (selectedEntity.type === 'embeddedBeam' && onDeleteEmbeddedBeam) { // NEW
+                    onDeleteEmbeddedBeam(selectedEntity.id as string);
                 }
             }
         };
@@ -421,7 +471,7 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
         return () => window.removeEventListener('click', handleGlobalClick);
     }, []);
 
-    const handleContextMenu = (clientX: number, clientY: number, target: { type: 'polygon' | 'load', id: string | number }) => {
+    const handleContextMenu = (clientX: number, clientY: number, target: { type: 'polygon' | 'load' | 'embeddedBeam', id: string | number }) => {
         if (!containerRef.current) return;
         const rect = containerRef.current.getBoundingClientRect();
 
@@ -536,12 +586,29 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                     );
                 })}
 
+                {embeddedBeams && embeddedBeams.map((beam) => {
+                    const isSelected = selectedEntity?.type === 'embeddedBeam' && selectedEntity.id === beam.id;
+                    const isActive = activeBeamIds ? activeBeamIds.includes(beam.id) : true;
+                    return (
+                        <EmbeddedBeamMarker
+                            key={beam.id}
+                            beam={beam}
+                            beamMaterials={beamMaterials || []}
+                            isSelected={isSelected}
+                            isActive={isActive}
+                            onSelect={() => onSelectEntity({ type: 'embeddedBeam', id: beam.id })}
+                            onContextMenu={(x, y) => handleContextMenu(x, y, { type: 'embeddedBeam', id: beam.id })}
+                        />
+                    );
+                })}
+
                 <DrawingManager
                     mode={drawMode}
                     onAddPolygon={onAddPolygon}
                     onAddPointLoad={onAddPointLoad}
                     onAddLineLoad={onAddLineLoad}
                     onAddWaterLevel={onAddWaterLevel}
+                    onAddEmbeddedBeam={onAddEmbeddedBeam} // NEW
                     onCancel={onCancelDraw}
                     generalSettings={generalSettings}
                 />
@@ -586,7 +653,9 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
                         >
                             {(contextMenu.target.type === 'polygon'
                                 ? activePolygonIndices?.includes(contextMenu.target.id as number)
-                                : activeLoadIds?.includes(contextMenu.target.id as string))
+                                : contextMenu.target.type === 'embeddedBeam'
+                                    ? activeBeamIds?.includes(contextMenu.target.id as string)
+                                    : activeLoadIds?.includes(contextMenu.target.id as string))
                                 ? 'Deactivate Element'
                                 : 'Activate Element'}
                         </button>

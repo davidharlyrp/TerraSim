@@ -1,5 +1,5 @@
 
-import { DrainageType, MaterialModel, PhaseRequest, PhaseType, MeshSettings, Material, SolverSettings } from './types';
+import { DrainageType, MaterialModel, PhaseRequest, PhaseType, MeshSettings, Material, SolverSettings, EmbeddedBeamMaterial } from './types';
 
 // Default Data for New Project
 export const DEFAULT_MATERIALS: Material[] = [
@@ -15,6 +15,21 @@ export const DEFAULT_MATERIALS: Material[] = [
     }
 ];
 
+export const DEFAULT_BEAM_MATERIALS: EmbeddedBeamMaterial[] = [
+    {
+        id: 'bmat_default',
+        name: 'Standard Pile',
+        color: '#f59e0b', // amber-500
+        youngsModulus: 30000000,
+        crossSectionArea: 0.2,
+        momentOfInertia: 0.005,
+        unitWeight: 7.85,
+        spacing: 2.0,
+        skinFrictionMax: 100,
+        tipResistanceMax: 500
+    }
+];
+
 export const DEFAULT_PHASES: PhaseRequest[] = [
     {
         id: 'phase_initial',
@@ -22,6 +37,7 @@ export const DEFAULT_PHASES: PhaseRequest[] = [
         phase_type: PhaseType.K0_PROCEDURE,
         active_polygon_indices: [],
         active_load_ids: [],
+        active_beam_ids: [],
         reset_displacements: false,
         current_material: {},
         parent_material: {}

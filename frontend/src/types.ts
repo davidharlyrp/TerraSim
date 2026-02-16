@@ -69,6 +69,25 @@ export interface Material {
     k0_z?: number;
 }
 
+export interface EmbeddedBeamMaterial {
+    id: string;
+    name: string;
+    color: string;
+    youngsModulus: number; // E
+    crossSectionArea: number; // A
+    momentOfInertia: number; // I
+    unitWeight: number; // w
+    spacing: number; // L_spacing
+    skinFrictionMax: number; // T_max
+    tipResistanceMax: number; // F_max
+}
+
+export interface EmbeddedBeam {
+    id: string;
+    points: Point[];
+    materialId: string;
+}
+
 export interface PointLoad {
     id: string;
     x: number;
@@ -101,6 +120,8 @@ export interface MeshRequest {
     // water_level removed
     water_levels?: WaterLevel[]; // NEW
     mesh_settings?: MeshSettings; // NEW: Global mesh settings
+    embedded_beams?: EmbeddedBeam[]; // NEW
+    beam_materials?: EmbeddedBeamMaterial[]; // NEW
 }
 
 // --- Project Management ---
@@ -120,6 +141,8 @@ export interface ProjectFile {
     lineLoads: LineLoad[];
     waterLevel: { x: number, y: number }[]; // Deprecated, keep for old file compat loading
     waterLevels: WaterLevel[]; // NEW
+    embeddedBeams: EmbeddedBeam[]; // NEW
+    beamMaterials: EmbeddedBeamMaterial[]; // NEW
     phases: PhaseRequest[];
     generalSettings: GeneralSettings;
     solverSettings: SolverSettings;
@@ -148,6 +171,11 @@ export interface LineLoadAssignment {
     edge_nodes: number[]; // 1-based node IDs
 }
 
+export interface EmbeddedBeamAssignment {
+    beam_id: string;
+    nodes: number[]; // 1-based node IDs
+}
+
 export interface ElementMaterial {
     element_id: number; // 1-based index (check backend usage, usually elements are 0-based in array but IDs might be 1-based)
     material: Material;
@@ -161,6 +189,7 @@ export interface MeshResponse {
     boundary_conditions: BoundaryConditionsResponse;
     point_load_assignments: PointLoadAssignment[];
     line_load_assignments: LineLoadAssignment[];
+    embedded_beam_assignments: EmbeddedBeamAssignment[]; // NEW
     element_materials: ElementMaterial[];
     error?: string;
 }
@@ -194,6 +223,7 @@ export interface PhaseRequest {
     current_material: Record<number, string>; // poly_idx -> material_id
     parent_material: Record<number, string>; // poly_idx -> material_id (snapshot of parent)
     active_water_level_id?: string; // NEW
+    active_beam_ids?: string[]; // IDs of active beams
 }
 
 export interface SolverRequest {
@@ -205,6 +235,8 @@ export interface SolverRequest {
     point_loads?: PointLoad[]; // Definitions
     line_loads?: LineLoad[];
     materials?: Material[]; // NEW: Material library for overrides
+    embedded_beams?: EmbeddedBeam[]; // NEW
+    beam_materials?: EmbeddedBeamMaterial[]; // NEW
 }
 
 export interface NodeResult {

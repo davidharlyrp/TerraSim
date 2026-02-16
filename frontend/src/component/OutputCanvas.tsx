@@ -16,7 +16,8 @@ interface OutputCanvasProps {
     showControls?: boolean;
     ignorePhases?: boolean;
     generalSettings: GeneralSettings;
-    materials: Material[]; // NEW
+    materials: Material[];
+    beamMaterials: any[]; // NEW
 }
 
 interface PolygonProps {
@@ -45,13 +46,15 @@ const BoundaryOverlay = ({
     phaseResult,
     phaseRequest,
     deformationScale,
-    prevPhaseResult
+    prevPhaseResult,
+    beamMaterials
 }: {
     mesh: MeshResponse,
     phaseResult: any,
     phaseRequest: PhaseRequest,
     deformationScale: number,
-    prevPhaseResult: any
+    prevPhaseResult: any,
+    beamMaterials: any[]
 }) => {
     const { fixedPositions, rollerPositions } = useMemo(() => {
         const fixed: number[] = [];
@@ -96,7 +99,7 @@ const BoundaryOverlay = ({
             fixedPositions: new Float32Array(fixed),
             rollerPositions: new Float32Array(roller)
         };
-    }, [mesh, phaseResult, deformationScale, phaseRequest, prevPhaseResult]);
+    }, [mesh, phaseResult, deformationScale, phaseRequest, prevPhaseResult, beamMaterials]);
 
     return (
         <group>
@@ -134,6 +137,76 @@ const BoundaryOverlay = ({
     );
 };
 
+const EmbeddedBeamOverlay = ({
+    mesh,
+    phaseResult,
+    phaseRequest,
+    deformationScale,
+    prevPhaseResult,
+    beamMaterials
+}: {
+    mesh: MeshResponse,
+    phaseResult: any,
+    phaseRequest: PhaseRequest,
+    deformationScale: number,
+    prevPhaseResult: any,
+    beamMaterials: any[]
+}) => {
+    const lines = useMemo(() => {
+        if (!mesh.embedded_beam_assignments) return [];
+
+        return mesh.embedded_beam_assignments.map((assignment) => {
+            const pts: THREE.Vector3[] = assignment.nodes.map(nIdxBase1 => {
+                const nIdx = nIdxBase1 - 1;
+                let x = mesh.nodes[nIdx][0];
+                let y = mesh.nodes[nIdx][1];
+
+                if (phaseResult) {
+                    const d = phaseResult.displacements.find((d: any) => d.id === nIdx + 1);
+                    if (d) {
+                        const resetVisual = phaseRequest?.reset_displacements || false;
+                        let dx = d.ux;
+                        let dy = d.uy;
+                        if (resetVisual && prevPhaseResult) {
+                            const dPrev = prevPhaseResult.displacements.find((d: any) => d.id === nIdx + 1);
+                            if (dPrev) {
+                                dx -= dPrev.ux;
+                                dy -= dPrev.uy;
+                            }
+                        }
+                        x += dx * deformationScale;
+                        y += dy * deformationScale;
+                    }
+                }
+                return new THREE.Vector3(x, y, 0.05); // Higher Z than BCs but lower than labels
+            });
+
+            // Find material color
+            const beamInstance = (phaseRequest as any).embedded_beams?.find((b: any) => b.id === assignment.beam_id);
+            const bMat = beamMaterials.find(m => m.id === beamInstance?.materialId);
+            const color = bMat?.color || "#f59e0b";
+            const isActive = phaseRequest?.active_beam_ids?.includes(assignment.beam_id);
+
+            return { pts, color, id: assignment.beam_id, isActive };
+        });
+    }, [mesh, phaseResult, deformationScale, phaseRequest, prevPhaseResult, beamMaterials]);
+
+    return (
+        <group>
+            {lines.map((line, i) => (
+                <Line
+                    key={i}
+                    points={line.pts}
+                    color={line.isActive ? line.color : "#94a3b8"}
+                    lineWidth={2}
+                    dashed={!line.isActive}
+                    frustumCulled={false}
+                />
+            ))}
+        </group>
+    );
+};
+
 const MeshResult = ({
     mesh,
     solverResult,
@@ -143,7 +216,8 @@ const MeshResult = ({
     outputType,
     onValueRangeChange,
     ignorePhases = false,
-    materials // NEW
+    materials, // NEW
+    beamMaterials
 }: {
     mesh: MeshResponse,
     solverResult: SolverResponse | null,
@@ -153,7 +227,8 @@ const MeshResult = ({
     outputType: OutputType,
     onValueRangeChange: (min: number, max: number, label: React.ReactNode) => void,
     ignorePhases?: boolean,
-    materials: Material[]
+    materials: Material[],
+    beamMaterials: any[]
 }) => {
     // ... existing MeshResult logic ...
     const { positions, colors, wireframePositions, rangeData } = useMemo(() => {
@@ -487,6 +562,20 @@ const MeshResult = ({
             });
 
             if (min === Infinity) { min = 0; max = 0; }
+
+            // Apply Noise Threshold Filters
+            const NOISE_DISP = 1e-7; // 0.1 micrometer
+            const NOISE_STRESS = 1e-3; // 1 Pa
+
+            let currentThreshold = outputType === OutputType.DEFORMED_CONTOUR ? NOISE_DISP : NOISE_STRESS;
+            if (outputType === OutputType.YIELD_STATUS) currentThreshold = 0;
+
+            if (max - min < currentThreshold) {
+                // Too small range -> Likely numerical noise. Clamp to neutral.
+                min = 0;
+                max = currentThreshold;
+            }
+
             if (min === max) max = min + 1e-9;
             if (rawMin === Infinity) { rawMin = 0; rawMax = 0; } // Fallback for raw
 
@@ -558,12 +647,14 @@ const MeshResult = ({
                 rangeData: { min: rawMin, max: rawMax, label: currentLabel } // Use RAW range for Legend
             };
         }
-    }, [mesh, solverResult, currentPhaseIdx, phases, deformationScale, outputType, ignorePhases, materials]);
+    }, [mesh, solverResult, currentPhaseIdx, phases, deformationScale, outputType, ignorePhases, materials, beamMaterials]);
 
     // Update range legend via effect
     React.useEffect(() => {
         onValueRangeChange(rangeData.min, rangeData.max, rangeData.label);
     }, [rangeData, onValueRangeChange]);
+
+    if (!mesh) return null;
 
     if (!mesh) return null;
 
@@ -593,12 +684,22 @@ const MeshResult = ({
                 </lineSegments>
             )}
 
+            <EmbeddedBeamOverlay
+                mesh={mesh}
+                phaseResult={solverResult?.phases?.[currentPhaseIdx]}
+                phaseRequest={phases[currentPhaseIdx]}
+                deformationScale={deformationScale}
+                prevPhaseResult={currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null}
+                beamMaterials={beamMaterials}
+            />
+
             <BoundaryOverlay
                 mesh={mesh}
                 phaseResult={solverResult?.phases?.[currentPhaseIdx]}
                 phaseRequest={phases[currentPhaseIdx]}
                 deformationScale={deformationScale}
                 prevPhaseResult={currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null}
+                beamMaterials={beamMaterials}
             />
         </group>
     );
@@ -663,7 +764,8 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
     phases,
     showControls = true,
     ignorePhases = false,
-    materials
+    materials,
+    beamMaterials
 }) => {
     const [sliderValue, setSliderValue] = useState(100);
     const [outputType, setOutputType] = useState<OutputType>(OutputType.DEFORMED_CONTOUR);
@@ -878,6 +980,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                             onValueRangeChange={handleRangeChange}
                             ignorePhases={ignorePhases}
                             materials={materials}
+                            beamMaterials={beamMaterials}
                         />
 
                         {/* Render Nodes if enabled */}

@@ -15,11 +15,12 @@ import { InputSidebar } from './component/InputSidebar';
 import { MeshSidebar } from './component/MeshSidebar';
 import { StagingSidebar } from './component/StagingSidebar';
 import { ResultSidebar } from './component/ResultSidebar';
-import { DEFAULT_PHASES, DEFAULT_MATERIALS, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS } from './sample_data';
+import { DEFAULT_PHASES, DEFAULT_MATERIALS, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS, DEFAULT_BEAM_MATERIALS } from './sample_data';
 import { SampleManifest } from './data/samples';
 import { api, ApiError } from './api';
-import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel } from './types';
+import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel, EmbeddedBeam, EmbeddedBeamMaterial } from './types';
 import { MaterialModal } from './component/MaterialModal';
+import { EmbeddedBeamMaterialModal } from './component/EmbeddedBeamMaterialModal';
 import { SettingsModal } from './component/SettingsModal';
 import { CloudLoadModal } from './component/CloudLoadModal';
 import { FeedbackModal } from './component/FeedbackModal';
@@ -49,11 +50,12 @@ function MainApp() {
     const [isSampleGalleryOpen, setIsSampleGalleryOpen] = useState(false);
 
     // 2. Data State
-    // 2. Data State
     const [materials, setMaterials] = useState<Material[]>(DEFAULT_MATERIALS);
+    const [beamMaterials, setBeamMaterials] = useState<EmbeddedBeamMaterial[]>(DEFAULT_BEAM_MATERIALS); // NEW
     const [polygons, setPolygons] = useState<PolygonData[]>([]);
     const [pointLoads, setPointLoads] = useState<PointLoad[]>([]);
     const [lineLoads, setLineLoads] = useState<LineLoad[]>([]);
+    const [embeddedBeams, setEmbeddedBeams] = useState<EmbeddedBeam[]>([]); // NEW
     const [waterLevels, setWaterLevels] = useState<WaterLevel[]>([]); // NEW
     const [phases, setPhases] = useState<PhaseRequest[]>(DEFAULT_PHASES);
     const [generalSettings, setGeneralSettings] = useState<GeneralSettings>(SAMPLE_GENERAL_SETTINGS);
@@ -69,6 +71,7 @@ function MainApp() {
     const [currentPhaseIdx, setCurrentPhaseIdx] = useState(0);
     const [liveStepPoints, setLiveStepPoints] = useState<StepPoint[]>([]);
     const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+    const [editingBeamMaterial, setEditingBeamMaterial] = useState<EmbeddedBeamMaterial | null>(null); // NEW
     const [drawMode, setDrawMode] = useState<string | null>(null);
     const [selectedEntity, setSelectedEntity] = useState<{ type: string, id: string | number } | null>(null);
 
@@ -145,7 +148,8 @@ function MainApp() {
                 pointLoads,
                 lineLoads,
                 // water_level removed
-                water_levels: waterLevels, // NEW
+                water_levels: waterLevels,
+                embedded_beams: embeddedBeams,
                 mesh_settings: meshSettings
             });
             setMeshResponse(result);
@@ -187,7 +191,9 @@ function MainApp() {
                 water_levels: waterLevels, // NEW
                 point_loads: pointLoads,
                 line_loads: lineLoads,
-                materials: materials // NEW
+                materials: materials,
+                embedded_beams: embeddedBeams,
+                beam_materials: beamMaterials
             }, controller.signal);
 
             if (!response.ok) {
@@ -319,6 +325,26 @@ function MainApp() {
             points
         };
         setWaterLevels([...waterLevels, newWL]);
+    };
+
+    const handleAddEmbeddedBeam = (points: { x: number, y: number }[]) => {
+        const id = `ebr_${Date.now()}`;
+        const newBeam: EmbeddedBeam = {
+            id,
+            points,
+            materialId: beamMaterials.length > 0 ? beamMaterials[0].id : ''
+        };
+        setEmbeddedBeams([...embeddedBeams, newBeam]);
+
+        // Auto-activate in current phase
+        const newPhases = [...phases];
+        if (newPhases[currentPhaseIdx]) {
+            const ph = { ...newPhases[currentPhaseIdx] };
+            ph.active_beam_ids = [...(ph.active_beam_ids || []), id];
+            newPhases[currentPhaseIdx] = ph;
+            setPhases(newPhases);
+        }
+
         setDrawMode(null);
     };
 
@@ -371,6 +397,23 @@ function MainApp() {
         setWaterLevels(next);
     };
 
+    const handleDeleteBeamMaterial = (id: string) => {
+        setBeamMaterials(beamMaterials.filter(m => m.id !== id));
+        if (selectedEntity?.type === 'beamMaterial' && selectedEntity.id === id) setSelectedEntity(null);
+        // Clear from beams using it
+        setEmbeddedBeams(embeddedBeams.map(b => b.materialId === id ? { ...b, materialId: '' } : b));
+    };
+
+    const handleDeleteEmbeddedBeam = (id: string) => {
+        setEmbeddedBeams(embeddedBeams.filter(b => b.id !== id));
+        if (selectedEntity?.type === 'embeddedBeam' && selectedEntity.id === id) setSelectedEntity(null);
+        // Clear from phases
+        setPhases(phases.map(p => ({
+            ...p,
+            active_beam_ids: p.active_beam_ids?.filter(bid => bid !== id) || []
+        })));
+    };
+
     const handleSaveProject = () => {
         const metadata: ProjectMetadata = {
             lastEdited: new Date().toISOString(),
@@ -383,11 +426,13 @@ function MainApp() {
             projectName,
             metadata,
             materials,
+            beamMaterials, // NEW
             polygons,
             pointLoads,
             lineLoads,
             waterLevel: waterLevels.length > 0 ? waterLevels[0].points : [],
             waterLevels,
+            embeddedBeams, // NEW
             phases,
             generalSettings,
             solverSettings,
@@ -418,10 +463,12 @@ function MainApp() {
                     try {
                         const projectFile: ProjectFile = JSON.parse(e.target?.result as string);
                         setMaterials(projectFile.materials || []);
+                        setBeamMaterials(projectFile.beamMaterials || []); // NEW
                         setPolygons(projectFile.polygons || []);
                         setPointLoads(projectFile.pointLoads || []);
                         setLineLoads(projectFile.lineLoads || []);
                         setWaterLevels(projectFile.waterLevels || []);
+                        setEmbeddedBeams(projectFile.embeddedBeams || []); // NEW
                         setPhases(projectFile.phases || []);
                         setGeneralSettings(projectFile.generalSettings || SAMPLE_GENERAL_SETTINGS);
                         setSolverSettings(projectFile.solverSettings || SAMPLE_SOLVER_SETTINGS);
@@ -456,10 +503,12 @@ function MainApp() {
                 // Reset to initial state
                 // Reset to initial state
                 setMaterials(DEFAULT_MATERIALS);
+                setBeamMaterials([]); // NEW
                 setPolygons([]);
                 setPointLoads([]);
                 setLineLoads([]);
                 setWaterLevels([]);
+                setEmbeddedBeams([]); // NEW
                 setPhases(DEFAULT_PHASES);
                 setGeneralSettings(SAMPLE_GENERAL_SETTINGS);
                 setSolverSettings(SAMPLE_SOLVER_SETTINGS);
@@ -508,6 +557,8 @@ function MainApp() {
             lineLoads,
             waterLevel: waterLevels.length > 0 ? waterLevels[0].points : [],
             waterLevels,
+            beamMaterials,
+            embeddedBeams,
             phases,
             generalSettings,
             solverSettings,
@@ -556,10 +607,12 @@ function MainApp() {
                 setConfirmConfig(prev => ({ ...prev, isOpen: false }));
                 try {
                     setMaterials(projectData.materials || []);
+                    setBeamMaterials(projectData.beamMaterials || []); // NEW
                     setPolygons(projectData.polygons || []);
                     setPointLoads(projectData.pointLoads || []);
                     setLineLoads(projectData.lineLoads || []);
                     setWaterLevels(projectData.waterLevels || []);
+                    setEmbeddedBeams(projectData.embeddedBeams || []); // NEW
                     setPhases(projectData.phases || []);
                     setGeneralSettings(projectData.generalSettings || SAMPLE_GENERAL_SETTINGS);
                     setSolverSettings(projectData.solverSettings || SAMPLE_SOLVER_SETTINGS);
@@ -589,10 +642,12 @@ function MainApp() {
 
                 const sample = sampleProps.data;
                 setMaterials(sample.materials);
+                setBeamMaterials(sample.beamMaterials || []); // NEW
                 setPolygons(sample.polygons);
                 setPointLoads(sample.pointLoads);
                 setLineLoads(sample.lineLoads || []);
                 setWaterLevels(sample.waterLevels || []);
+                setEmbeddedBeams(sample.embeddedBeams || []); // NEW
                 setPhases(sample.phases);
                 setGeneralSettings(sample.generalSettings || SAMPLE_GENERAL_SETTINGS);
                 setSolverSettings(sample.solverSettings || SAMPLE_SOLVER_SETTINGS);
@@ -609,13 +664,16 @@ function MainApp() {
         );
     };
 
-    const handleToggleActive = (type: 'polygon' | 'load', id: string | number) => {
+    const handleToggleActive = (type: 'polygon' | 'load' | 'embeddedBeam', id: string | number) => {
         const newPhases = [...phases];
-        const phase = { ...newPhases[currentPhaseIdx] };
+        const phase = { ...newPhases[currentPhaseIdx] }; // Shallow copy phase object
 
         if (!phase.active_polygon_indices) phase.active_polygon_indices = polygons.map((_, i) => i);
         if (!phase.active_load_ids) {
             phase.active_load_ids = [...pointLoads.map(l => l.id), ...lineLoads.map(l => l.id)];
+        }
+        if (!phase.active_beam_ids) {
+            phase.active_beam_ids = embeddedBeams.map(b => b.id);
         }
 
         if (type === 'polygon') {
@@ -641,9 +699,21 @@ function MainApp() {
             // Assign back before propagation
             newPhases[currentPhaseIdx] = phase;
 
+
             // Propagate material changes
             propagateMaterialChanges(newPhases, phase.id, oldCurrentMat, polygons);
 
+        } else if (type === 'embeddedBeam') {
+            const beamId = id as string;
+            // Ensure array exists
+            const currentIds = phase.active_beam_ids || [];
+
+            if (currentIds.includes(beamId)) {
+                phase.active_beam_ids = currentIds.filter(bid => bid !== beamId);
+            } else {
+                phase.active_beam_ids = [...currentIds, beamId];
+            }
+            newPhases[currentPhaseIdx] = phase;
         } else {
             const loadId = id as string;
             if (phase.active_load_ids.includes(loadId)) {
@@ -743,22 +813,30 @@ function MainApp() {
                                     <div className={`absolute top-0 left-0 z-10 ${inputSideBarOpen ? 'translate-x-0' : '-translate-x-[calc(100vw-32px)]'} transition`}>
                                         <InputSidebar
                                             materials={materials}
+                                            beamMaterials={beamMaterials} // NEW
                                             polygons={polygons}
                                             pointLoads={pointLoads}
                                             lineLoads={lineLoads}
+                                            embeddedBeams={embeddedBeams} // NEW
                                             waterLevels={waterLevels} // NEW
                                             onUpdateMaterials={setMaterials}
+                                            onUpdateBeamMaterials={setBeamMaterials} // NEW
                                             onUpdatePolygons={setPolygons}
                                             onUpdateLoads={setPointLoads}
                                             onUpdateLineLoads={setLineLoads}
+                                            onUpdateEmbeddedBeams={setEmbeddedBeams} // NEW
                                             onAddWaterLevel={handleAddWaterLevel} // NEW
                                             onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
                                             onDeleteWaterPoint={handleDeleteWaterPoint} // NEW
                                             onUpdatePolygonPoints={handleUpdatePolygonPoints}
                                             onEditMaterial={setEditingMaterial}
+                                            onEditBeamMaterial={(mat) => setEditingBeamMaterial(mat)} // NEW
                                             onDeleteMaterial={handleDeleteMaterial}
+                                            onDeleteBeamMaterial={handleDeleteBeamMaterial} // NEW
                                             onDeletePolygon={handleDeletePolygon}
                                             onDeleteLoad={handleDeleteLoad}
+                                            onDeleteLineLoad={handleDeleteLoad}
+                                            onDeleteEmbeddedBeam={handleDeleteEmbeddedBeam} // NEW
                                             onDeleteWaterLevel={handleDeleteWaterLevel}
                                             selectedEntity={selectedEntity}
                                             onSelectEntity={setSelectedEntity}
@@ -768,22 +846,30 @@ function MainApp() {
                                 {!isWindowSizeSmall && (
                                     <InputSidebar
                                         materials={materials}
+                                        beamMaterials={beamMaterials} // NEW
                                         polygons={polygons}
                                         pointLoads={pointLoads}
                                         lineLoads={lineLoads}
+                                        embeddedBeams={embeddedBeams} // NEW
                                         waterLevels={waterLevels} // NEW
                                         onUpdateMaterials={setMaterials}
+                                        onUpdateBeamMaterials={setBeamMaterials} // NEW
                                         onUpdatePolygons={setPolygons}
                                         onUpdateLoads={setPointLoads}
                                         onUpdateLineLoads={setLineLoads}
+                                        onUpdateEmbeddedBeams={setEmbeddedBeams} // NEW
                                         onAddWaterLevel={handleAddWaterLevel} // NEW
                                         onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
                                         onDeleteWaterPoint={handleDeleteWaterPoint} // NEW
                                         onUpdatePolygonPoints={handleUpdatePolygonPoints}
                                         onEditMaterial={setEditingMaterial}
+                                        onEditBeamMaterial={(mat) => setEditingBeamMaterial(mat)} // NEW
                                         onDeleteMaterial={handleDeleteMaterial}
+                                        onDeleteBeamMaterial={handleDeleteBeamMaterial} // NEW
                                         onDeletePolygon={handleDeletePolygon}
                                         onDeleteLoad={handleDeleteLoad}
+                                        onDeleteLineLoad={handleDeleteLoad}
+                                        onDeleteEmbeddedBeam={handleDeleteEmbeddedBeam} // NEW
                                         onDeleteWaterLevel={handleDeleteWaterLevel}
                                         selectedEntity={selectedEntity}
                                         onSelectEntity={setSelectedEntity}
@@ -837,6 +923,7 @@ function MainApp() {
                                             polygons={polygons}
                                             pointLoads={pointLoads}
                                             lineLoads={lineLoads}
+                                            embeddedBeams={embeddedBeams}
                                             waterLevels={waterLevels} // NEW
                                             onPhasesChange={setPhases}
                                             onSelectPhase={setCurrentPhaseIdx}
@@ -850,6 +937,7 @@ function MainApp() {
                                         polygons={polygons}
                                         pointLoads={pointLoads}
                                         lineLoads={lineLoads}
+                                        embeddedBeams={embeddedBeams}
                                         waterLevels={waterLevels} // NEW
                                         onPhasesChange={setPhases}
                                         onSelectPhase={setCurrentPhaseIdx}
@@ -879,6 +967,7 @@ function MainApp() {
                                 onAddPointLoad={handleAddPointLoad}
                                 onAddLineLoad={handleAddLineLoad}
                                 onAddWaterLevel={handleAddWaterLevel}
+                                onAddEmbeddedBeam={handleAddEmbeddedBeam} // NEW
                                 onCancelDraw={() => setDrawMode(null)}
                                 selectedEntity={selectedEntity}
                                 onSelectEntity={setSelectedEntity}
@@ -890,6 +979,8 @@ function MainApp() {
                                 activeTab={activeTab}
                                 currentPhaseType={currentPhase?.phase_type}
                                 generalSettings={generalSettings}
+                                embeddedBeams={embeddedBeams} // NEW
+                                beamMaterials={beamMaterials} // NEW
                             />
                         )}
 
@@ -903,6 +994,7 @@ function MainApp() {
                                 activePolygonIndices={currentPhase?.active_polygon_indices}
                                 activeLoadIds={currentPhase?.active_load_ids}
                                 activeWaterLevelId={currentPhase?.active_water_level_id} // NEW
+                                activeBeamIds={currentPhase?.active_beam_ids} // NEW
                                 drawMode={null}
                                 onAddPolygon={() => { }}
                                 onAddPointLoad={() => { }}
@@ -922,6 +1014,8 @@ function MainApp() {
                                 currentMaterial={currentPhase?.current_material}
                                 onOverrideMaterial={handleOverrideMaterial}
                                 onUpdateWaterLevel={() => { }}
+                                embeddedBeams={embeddedBeams} // NEW
+                                beamMaterials={beamMaterials} // NEW
                             />
                         )}
 
@@ -938,6 +1032,7 @@ function MainApp() {
                                         ignorePhases={true}
                                         generalSettings={generalSettings}
                                         materials={materials}
+                                        beamMaterials={beamMaterials}
                                     />
                                 ) : (
                                     <div className="text-slate-500 text-sm animate-pulse">Click "Generate Mesh" to see the mesh</div>
@@ -955,6 +1050,7 @@ function MainApp() {
                                     phases={phases}
                                     generalSettings={generalSettings}
                                     materials={materials}
+                                    beamMaterials={beamMaterials}
                                 />
                                 <div className={`md:hidden flex items-start justify-center absolute top-0 right-0 w-12 p-2 h-full border-x dark:border-slate-700 border-slate-200 dark:bg-slate-900 bg-slate-100 z-48 ${resultSideBarOpen ? '-translate-x-[calc(100vw-60px)]' : 'translate-x-0'} transition`}>
                                     <button onClick={() => setResultSideBarOpen(!resultSideBarOpen)}>
@@ -998,6 +1094,17 @@ function MainApp() {
                     material={editingMaterial}
                     onSave={handleSaveMaterial}
                     onClose={() => setEditingMaterial(null)}
+                />
+            )}
+
+            {editingBeamMaterial && (
+                <EmbeddedBeamMaterialModal
+                    material={editingBeamMaterial}
+                    onSave={(updated) => {
+                        setBeamMaterials(beamMaterials.map(m => m.id === updated.id ? updated : m));
+                        setEditingBeamMaterial(null);
+                    }}
+                    onClose={() => setEditingBeamMaterial(null)}
                 />
             )}
 

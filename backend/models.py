@@ -69,6 +69,21 @@ class Material(BaseModel):
     k0_x: Optional[float] = None  # Coefficient of lateral earth pressure (auto-calculated if None)
     k0_z: Optional[float] = None  # Often same as k0_x, but can be different for anisotropy
 
+class EmbeddedBeamMaterial(BaseModel):
+    id: str
+    name: str
+    color: str
+    youngsModulus: float # E (kN/m2)
+    crossSectionArea: float # A (m2)
+    momentOfInertia: float # I (m4)
+    unitWeight: float # w (kN/m/m) -> actually usually kN/m per beam. But for 2D we need to know.
+                      # Let's stick to Plaxis style: w is weight per unit length of the beam (kN/m).
+    spacing: float # L_spacing (m) - out of plane spacing
+    skinFrictionMax: float # T_max (kN/m) - limit shear force per unit length of beam
+    tipResistanceMax: float # F_max (kN) - limit compressive force at the tip
+    # Connection logic (top/bottom) could be here or in the beam instance. 
+    # Usually connection type is a property of the beam instance's node, but material property is E, A, I.
+
 class PointLoad(BaseModel):
     id: str
     x: float
@@ -86,6 +101,11 @@ class LineLoad(BaseModel):
     fx: float # (kN/m)
     fy: float
 
+class EmbeddedBeam(BaseModel):
+    id: str
+    points: List[Point] # Usually 2 points for a line segment [start, end]
+    materialId: str
+
 class MeshSettings(BaseModel):
     mesh_size: float = 2.0
     boundary_refinement_factor: float = 1.0
@@ -98,6 +118,8 @@ class MeshRequest(BaseModel):
     mesh_settings: Optional[MeshSettings] = MeshSettings()
     # water_level removed. Use water_levels.
     water_levels: Optional[List[WaterLevel]] = [] # NEW
+    embedded_beams: Optional[List[EmbeddedBeam]] = [] # NEW
+    beam_materials: Optional[List[EmbeddedBeamMaterial]] = [] # NEW
 
 class BoundaryCondition(BaseModel):
     node: int  # 1-based index usually for FE, but typically backend sends 0-based for arrays. 
@@ -120,6 +142,11 @@ class ElementMaterial(BaseModel):
     material: Material
     polygon_id: Optional[int] = None # NEW: 0-based index of polygon in MeshRequest
 
+class EmbeddedBeamAssignment(BaseModel):
+    beam_id: str
+    nodes: List[int] # Ordered list of node IDs (1-based) defining the beam chain
+
+
 
 class MeshResponse(BaseModel):
     success: bool
@@ -128,6 +155,7 @@ class MeshResponse(BaseModel):
     boundary_conditions: BoundaryConditionsResponse
     point_load_assignments: List[PointLoadAssignment]
     line_load_assignments: List[LineLoadAssignment]
+    embedded_beam_assignments: List[EmbeddedBeamAssignment] # NEW
     element_materials: List[ElementMaterial]
     error: Optional[str] = None
 
@@ -160,6 +188,7 @@ class PhaseRequest(BaseModel):
     current_material: Dict[int, str] = {} # Map polygon_index -> material_id (full state for this phase)
     parent_material: Dict[int, str] = {} # Map polygon_index -> material_id (inherited from parent)
     active_water_level_id: Optional[str] = None # NEW
+    active_beam_ids: Optional[List[str]] = [] # IDs of active beams
 
 class SolverRequest(BaseModel):
     mesh: MeshResponse
@@ -169,7 +198,9 @@ class SolverRequest(BaseModel):
     water_levels: Optional[List[WaterLevel]] = [] # NEW
     point_loads: Optional[List[PointLoad]] = [] # Definitions of load vectors
     line_loads: Optional[List[LineLoad]] = []
+    embedded_beams: Optional[List[EmbeddedBeam]] = [] # NEW
     materials: List[Material] = [] # NEW: Library of all available materials
+    beam_materials: List[EmbeddedBeamMaterial] = [] # NEW
 
 class NodeResult(BaseModel):
     id: int # 1-based

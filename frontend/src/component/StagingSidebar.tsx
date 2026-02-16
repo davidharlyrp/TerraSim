@@ -13,6 +13,7 @@ const propagateSafetyState = (updatedPhases: PhaseRequest[], parentId: string) =
                 ph.active_polygon_indices = [...parent.active_polygon_indices];
                 ph.active_load_ids = [...parent.active_load_ids];
                 ph.active_water_level_id = parent.active_water_level_id;
+                ph.active_beam_ids = parent.active_beam_ids ? [...parent.active_beam_ids] : [];
                 // Recurse
                 propagateSafetyState(updatedPhases, ph.id);
             }
@@ -342,6 +343,7 @@ interface StagingSidebarProps {
     polygons: PolygonData[];
     pointLoads: PointLoad[];
     lineLoads: LineLoad[];
+    embeddedBeams: any[];
     waterLevels: { id: string; name: string }[]; // NEW
     onPhasesChange: (phases: PhaseRequest[]) => void;
     onSelectPhase: (idx: number) => void;
@@ -353,6 +355,7 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
     polygons,
     pointLoads,
     lineLoads,
+    embeddedBeams, // NEW
     waterLevels,
     onPhasesChange,
     onSelectPhase
@@ -416,6 +419,20 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
         onPhasesChange(newPhases);
     };
 
+    const toggleBeam = (beamId: string) => {
+        const newPhases = [...phases];
+        const current = { ...newPhases[currentPhaseIdx] };
+        newPhases[currentPhaseIdx] = current;
+
+        const active = new Set(current.active_beam_ids || []);
+        if (active.has(beamId)) active.delete(beamId);
+        else active.add(beamId);
+        current.active_beam_ids = Array.from(active);
+
+        propagateSafetyState(newPhases, current.id);
+        onPhasesChange(newPhases);
+    };
+
     const [isPhaseOpen, setIsPhaseOpen] = useState(true);
     const [isComponentExplorerOpen, setIsComponentExplorerOpen] = useState(true);
     const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
@@ -468,6 +485,7 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
                                 active_polygon_indices: lastPhase ? [...lastPhase.active_polygon_indices] : [],
                                 active_load_ids: lastPhase ? [...lastPhase.active_load_ids] : [],
                                 active_water_level_id: lastPhase ? lastPhase.active_water_level_id : undefined,
+                                active_beam_ids: lastPhase?.active_beam_ids ? [...lastPhase.active_beam_ids] : [],
                                 parent_material: lastPhase ? { ...lastPhase.current_material } : {},
                                 current_material: lastPhase ? { ...lastPhase.current_material } : {},
                                 parent_id: parentId // Default parent is the previous phase
@@ -568,6 +586,23 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
                                             className="w-3 h-3 rounded border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-blue-600 focus:ring-offset-slate-900"
                                         />
                                         <span>{load.id} <span className="opacity-50 text-[10px]">(@{load.x1},{load.y1} to @{load.x2},{load.y2})</span></span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">EMBEDDED BEAMS <span className='font-normal'>({embeddedBeams.length})</span></div>
+                            <div className="space-y-2">
+                                {embeddedBeams.map((beam) => (
+                                    <label key={beam.id} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            checked={currentPhase?.active_beam_ids?.includes(beam.id)}
+                                            onChange={() => toggleBeam(beam.id)}
+                                            className="w-3 h-3 rounded border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-blue-600 focus:ring-offset-slate-900"
+                                        />
+                                        <span>{beam.id} <span className="opacity-50 text-[10px]">({beam.materialId})</span></span>
                                     </label>
                                 ))}
                             </div>

@@ -1,4 +1,4 @@
-import { Folder, Square, ArrowDownToDot, Pen, ChartNoAxesColumnDecreasing, ChartNoAxesColumnIncreasing, ArrowDownToLine, ArrowDown, Pentagon } from 'lucide-react';
+import { Folder, Square, ArrowDownToDot, Pen, ChartNoAxesColumnDecreasing, ChartNoAxesColumnIncreasing, ArrowDownToLine, ArrowDown, Pentagon, TestTube } from 'lucide-react';
 
 interface InputToolbarProps {
     drawMode: string | null;
@@ -109,6 +109,21 @@ export const InputToolbar: React.FC<InputToolbarProps> = ({ drawMode, onDrawMode
                 </div>
                 <span className="absolute right-12 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
                     Draw Water Level
+                </span>
+            </button>
+
+            <button
+                onClick={() => onDrawModeChange(drawMode === 'embedded_beam' ? null : 'embedded_beam')}
+                title="Draw Embedded Beam"
+                className={`cursor-pointer w-10 h-10 p-2 rounded-lg transition-colors relative group flex items-center justify-center ${drawMode === 'embedded_beam' ? 'bg-amber-100 dark:bg-amber-600/20 text-amber-600 dark:text-amber-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                    }`}
+            >
+                <div className="relative">
+                    <TestTube className="w-5 h-5" />
+                    <Pen className='absolute -top-1 -right-1 w-3 h-3' />
+                </div>
+                <span className="absolute right-12 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                    Draw Embedded Beam
                 </span>
             </button>
         </div>

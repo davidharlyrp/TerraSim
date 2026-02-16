@@ -1,4 +1,4 @@
-# 07. Panduan Pengembangan: Model Material Hoek-Brown (Rock)
+# 06. Panduan Pengembangan: Model Material Hoek-Brown (Rock)
 
 Dokumen ini berisi panduan teknis untuk mengimplementasikan model konstitutif **Hoek-Brown** ke dalam TerraSim. Model ini sangat penting untuk simulasi mekanika batuan.
 
@@ -105,7 +105,8 @@ Untuk model Hoek-Brown, parameter yang direduksi oleh faktor keamanan (SF) adala
 *Catatan: Parameter 'a' biasanya dianggap konstan karena lebih berkaitan dengan geometri rekahan (GSI) daripada kekuatan material itu sendiri.*
 
 update, formula terbaru digunakan dari artikel jurnal
-"A strength reduction method based on the Generalized Hoek-Brown criterion for rock slope stability analysis" oleh Yuan Wei, Li Jiaxin, Li Zonghong, Wang Wei, Sun Xiaoyun
+*"A strength reduction method based on the Generalized Hoek-Brown criterion for rock slope stability analysis"*
+oleh Yuan Wei, Li Jiaxin, Li Zonghong, Wang Wei, Sun Xiaoyun
 
 
 ### 4.2 Implementasi di Loop Solver

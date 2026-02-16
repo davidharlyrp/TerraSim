@@ -1,4 +1,4 @@
-import { PolygonData, Material, PointLoad, LineLoad, WaterLevel } from '../types';
+import { PolygonData, Material, PointLoad, LineLoad, WaterLevel, EmbeddedBeam, EmbeddedBeamMaterial } from '../types';
 import { ChevronDown, Pencil, Trash, ChevronRight, Plus } from 'lucide-react';
 import { MathRender } from './Math';
 import { useState, useEffect } from 'react';
@@ -10,17 +10,25 @@ interface InputSidebarProps {
     pointLoads: PointLoad[];
     lineLoads: LineLoad[];
     waterLevels: WaterLevel[]; // NEW
+    embeddedBeams: EmbeddedBeam[]; // NEW
+    beamMaterials: EmbeddedBeamMaterial[]; // NEW
     onUpdateMaterials: (m: Material[]) => void;
+    onUpdateBeamMaterials: (m: EmbeddedBeamMaterial[]) => void; // NEW
     onUpdatePolygons: (p: PolygonData[]) => void;
     onUpdateLoads: (l: PointLoad[]) => void;
     onUpdateLineLoads: (l: LineLoad[]) => void;
+    onUpdateEmbeddedBeams: (b: EmbeddedBeam[]) => void; // NEW
     onAddWaterLevel: (points: { x: number, y: number }[]) => void; // NEW
     onUpdateWaterLevel: (index: number, wl: WaterLevel) => void; // NEW
     onUpdatePolygonPoints: (index: number, points: { x: number, y: number }[]) => void; // NEW
     onEditMaterial: (mat: Material) => void;
+    onEditBeamMaterial: (mat: EmbeddedBeamMaterial) => void; // NEW
     onDeleteMaterial: (id: string) => void;
+    onDeleteBeamMaterial: (id: string) => void; // NEW
     onDeletePolygon: (idx: number) => void;
     onDeleteLoad: (id: string) => void;
+    onDeleteLineLoad: (id: string) => void; // NEW (MISSING IN ORIGINAL?)
+    onDeleteEmbeddedBeam: (id: string) => void; // NEW
     onDeleteWaterLevel: (id: string) => void;
     onDeleteWaterPoint: (wlIndex: number, ptIndex: number) => void; // NEW
     selectedEntity: { type: string, id: string | number } | null;
@@ -67,25 +75,33 @@ const NumericInput: React.FC<{
 
 export const InputSidebar: React.FC<InputSidebarProps> = ({
     materials,
+    beamMaterials,
     polygons,
     pointLoads,
     lineLoads,
+    embeddedBeams,
     waterLevels,
     onUpdateMaterials,
+    onUpdateBeamMaterials,
     onUpdatePolygons,
     onUpdateLoads,
     onUpdateLineLoads,
+    onUpdateEmbeddedBeams,
     onAddWaterLevel,
     onUpdateWaterLevel,
     onUpdatePolygonPoints,
     onEditMaterial,
+    onEditBeamMaterial,
     onDeleteMaterial,
+    onDeleteBeamMaterial,
     onDeletePolygon,
     onDeleteLoad,
+    onDeleteLineLoad,
+    onDeleteEmbeddedBeam,
     onDeleteWaterLevel,
     onDeleteWaterPoint,
     selectedEntity,
-    onSelectEntity
+    onSelectEntity,
 }) => {
     const handleAddMaterial = () => {
         const firstMat = materials[0];
@@ -103,8 +119,34 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
         onUpdateMaterials([...materials, newMat]);
     };
 
+    const handleAddBeamMaterial = () => {
+        const newMat: EmbeddedBeamMaterial = {
+            id: `bmat_${Date.now()}`,
+            name: 'New Beam Mat',
+            color: '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0'),
+            youngsModulus: 30000000,
+            crossSectionArea: 0.28,
+            momentOfInertia: 0.006,
+            unitWeight: 7,
+            spacing: 2.0,
+            skinFrictionMax: 200,
+            tipResistanceMax: 1000
+        };
+        onUpdateBeamMaterials([...beamMaterials, newMat]);
+    };
+
     const handleUpdateMatColor = (id: string, color: string) => {
         onUpdateMaterials(materials.map(m => m.id === id ? { ...m, color } : m));
+    };
+
+    const handleUpdateBeamMatColor = (id: string, color: string) => {
+        onUpdateBeamMaterials(beamMaterials.map(m => m.id === id ? { ...m, color } : m));
+    };
+
+    const handleUpdateEmbeddedBeamMat = (idx: number, matId: string) => {
+        const newBeams = [...embeddedBeams];
+        newBeams[idx] = { ...newBeams[idx], materialId: matId };
+        onUpdateEmbeddedBeams(newBeams);
     };
 
     const handleUpdatePolygonMat = (idx: number, matId: string) => {
@@ -133,6 +175,17 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             fy: -50
         };
         onUpdateLineLoads([...lineLoads, newLoad]);
+    };
+
+    const handleAddEmbeddedBeam = () => {
+        // This is usually done via Canvas tool, but if added here manually:
+        const mat = beamMaterials[0]?.id || "";
+        const newBeam: EmbeddedBeam = {
+            id: `beam_${embeddedBeams.length + 1}`,
+            points: [{ x: 5, y: 10 }, { x: 5, y: 0 }],
+            materialId: mat
+        };
+        onUpdateEmbeddedBeams([...embeddedBeams, newBeam]);
     };
 
     // WATER LEVEL HANDLERS
@@ -181,6 +234,8 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
     const [isLoadOpen, setIsLoadOpen] = useState(true);
     const [isLineLoadOpen, setIsLineLoadOpen] = useState(true);
     const [isWaterOpen, setIsWaterOpen] = useState(true);
+    const [isBeamMaterialOpen, setIsBeamMaterialOpen] = useState(true);
+    const [isEmbeddedBeamOpen, setIsEmbeddedBeamOpen] = useState(true);
     const [expandedWaterLevelId, setExpandedWaterLevelId] = useState<string | null>(null);
     const [expandedPolygonId, setExpandedPolygonId] = useState<number | null>(null);
 
@@ -235,6 +290,58 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                         </div>
                     ))}
                     <button onClick={handleAddMaterial} className="add-button">+ Add Material</button>
+                </div>
+            )}
+
+            {/* BEAM MATERIALS */}
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsBeamMaterialOpen(!isBeamMaterialOpen) }}>
+                Beam Materials
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
+                    <ChevronDown className={`w-4 h-4 transition ${isBeamMaterialOpen ? "rotate-180" : ""}`} />
+                </div>
+            </button>
+            {isBeamMaterialOpen && (
+                <div className="p-3 space-y-2">
+                    {beamMaterials.map(mat => (
+                        <div
+                            key={mat.id}
+                            onClick={() => onSelectEntity({ type: 'beamMaterial', id: mat.id })}
+                            className={`flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border transition-all cursor-pointer ${selectedEntity?.type === 'beamMaterial' && selectedEntity.id === mat.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}
+                        >
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="color"
+                                    value={mat.color}
+                                    onChange={(e) => handleUpdateBeamMatColor(mat.id, e.target.value)}
+                                    className="w-6 h-6 p-0 border-none bg-transparent cursor-pointer rounded overflow-hidden"
+                                    title="Change Color"
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="itemlabel">{mat.name}</div>
+                                </div>
+                                <div className="flex gap-1">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); onEditBeamMaterial(mat); }}
+                                        className="cursor-pointer p-1.5 rounded hover:bg-slate-600 hover:text-white transition-colors"
+                                        title="Edit Beam Material"
+                                    >
+                                        <Pencil className='w-3.5 h-3.5' />
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); onDeleteBeamMaterial(mat.id); }}
+                                        className="cursor-pointer p-1.5 rounded hover:bg-rose-500/20 hover:text-rose-500 transition-colors"
+                                        title="Delete Beam Material"
+                                    >
+                                        <Trash className='w-3.5 h-3.5' />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    <button onClick={handleAddBeamMaterial} className="add-button">+ Add Beam Material</button>
                 </div>
             )}
 
@@ -494,7 +601,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                         >
                             <div className="flex justify-between items-center">
                                 <span className="itemlabel">{load.id}</span>
-                                <button onClick={(e) => { e.stopPropagation(); onDeleteLoad(load.id); }} className="cursor-pointer p-1.5 text-slate-500 hover:text-rose-500 transition-colors">
+                                <button onClick={(e) => { e.stopPropagation(); onDeleteLineLoad(load.id); }} className="cursor-pointer p-1.5 text-slate-500 hover:text-rose-500 transition-colors">
                                     <Trash className="w-3.5 h-3.5" />
                                 </button>
                             </div>
@@ -573,6 +680,50 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
                         </div>
                     ))}
                     <button onClick={handleAddLineLoad} className="add-button">+ Add Line Load</button>
+                </div>
+            )}
+
+            {/* EMBEDDED BEAMS */}
+            <button
+                className="dropdownlabel2"
+                onClick={() => { setIsEmbeddedBeamOpen(!isEmbeddedBeamOpen) }}>
+                Embedded Beams
+                <div
+                    className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
+                    <ChevronDown className={`w-4 h-4 transition ${isEmbeddedBeamOpen ? "rotate-180" : ""}`} />
+                </div>
+            </button>
+            {isEmbeddedBeamOpen && (
+                <div className="p-4 space-y-2">
+                    {embeddedBeams.map((beam, i) => (
+                        <div
+                            key={beam.id}
+                            onClick={() => onSelectEntity({ type: 'embeddedBeam', id: beam.id })}
+                            className={`flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-800 rounded border transition-all cursor-pointer ${selectedEntity?.type === 'embeddedBeam' && selectedEntity.id === beam.id ? 'border-blue-500 ring-1 ring-blue-500/50' : 'border-slate-200 dark:border-slate-700'}`}
+                        >
+                            <div className="flex justify-between items-center">
+                                <span className="itemlabel">{beam.id}</span>
+                                <div className="flex gap-2">
+                                    <select
+                                        value={beam.materialId}
+                                        onChange={(e) => handleUpdateEmbeddedBeamMat(i, e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] px-1 py-0.5 rounded text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500 max-w-[100px]"
+                                    >
+                                        {beamMaterials.length === 0 && <option value="">No material</option>}
+                                        {beamMaterials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                    </select>
+                                    <button onClick={(e) => { e.stopPropagation(); onDeleteEmbeddedBeam(beam.id); }} className="cursor-pointer p-1.5 text-slate-500 hover:text-rose-500 transition-colors">
+                                        <Trash className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                ({beam.points[0].x.toFixed(2)}, {beam.points[0].y.toFixed(2)}) → ({beam.points[1].x.toFixed(2)}, {beam.points[1].y.toFixed(2)})
+                            </div>
+                        </div>
+                    ))}
+                    <button onClick={handleAddEmbeddedBeam} className="add-button">+ Add Beam (Manual)</button>
                 </div>
             )}
         </div>

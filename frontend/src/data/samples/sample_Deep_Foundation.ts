@@ -1,5 +1,5 @@
 
-import { DrainageType, MaterialModel, PhaseRequest, PhaseType, PointLoad, PolygonData, Material, WaterLevel, GeneralSettings, MeshSettings, EmbeddedBeamMaterial } from '../../types';
+import { DrainageType, MaterialModel, PhaseRequest, PhaseType, PointLoad, PolygonData, Material, WaterLevel, GeneralSettings, MeshSettings, EmbeddedBeamMaterial, EmbeddedBeam } from '../../types';
 
 // Sample Materials
 export const SAMPLE_MATERIALS: Material[] = [
@@ -89,75 +89,12 @@ export const SAMPLE_POLYGONS: PolygonData[] = [
     // Top Layer (Clay)
     {
         vertices: [
-            { x: -10, y: 2 },
-            { x: -1, y: 2 },
-            { x: -1, y: 2.4 },
-            { x: -10, y: 2.4 },
-        ],
-        materialId: 'mat_undrained_a_clay',
-    },
-    // Top Layer (Clay)
-    {
-        vertices: [
-            { x: 10, y: 2 },
-            { x: 1, y: 2 },
-            { x: 1, y: 2.4 },
-            { x: 10, y: 2.4 },
-        ],
-        materialId: 'mat_undrained_a_clay',
-    },
-    // Top Layer (Clay)
-    {
-        vertices: [
-            { x: -10, y: 2.4 },
-            { x: -0.2, y: 2.4 },
-            { x: -0.2, y: 3.0 },
-            { x: -10, y: 3.0 },
-        ],
-        materialId: 'mat_undrained_a_clay',
-    },
-    // Top Layer (Clay)
-    {
-        vertices: [
-            { x: 10, y: 2.4 },
-            { x: 0.2, y: 2.4 },
-            { x: 0.2, y: 3.0 },
-            { x: 10, y: 3.0 },
-        ],
-        materialId: 'mat_undrained_a_clay',
-    },
-    // Top Layer (Clay)
-    {
-        vertices: [
-            { x: -10, y: 3.0 },
-            { x: -0.2, y: 3.0 },
-            { x: -0.2, y: 3.5 },
+            { x: -10, y: 2.0 },
+            { x: 10, y: 2.0 },
+            { x: 10, y: 3.5 },
             { x: -10, y: 3.5 },
         ],
         materialId: 'mat_undrained_a_clay',
-    },
-    {
-        vertices: [
-            { x: 10, y: 3.0 },
-            { x: 0.2, y: 3.0 },
-            { x: 0.2, y: 3.5 },
-            { x: 10, y: 3.5 },
-        ],
-        materialId: 'mat_undrained_a_clay',
-    },
-    // Foundation
-    {
-        vertices: [
-            { x: -1, y: 2 },
-            { x: -1, y: 2.4 },
-            { x: -0.2, y: 2.4 },
-            { x: -0.2, y: 3.5 },
-            { x: 0.2, y: 3.5 },
-            { x: 0.2, y: 2.4 },
-            { x: 1, y: 2.4 },
-            { x: 1, y: 2 },
-        ],
-        materialId: 'mat_non_porous',
     },
 ];
 
@@ -167,20 +104,31 @@ export const SAMPLE_POINT_LOADS: PointLoad[] = [
         x: 0,
         y: 3.5,
         fx: 0.0,
-        fy: -200.0, // 100 kN downward
+        fy: -450.0, // 100 kN downward
     },
+];
+
+export const SAMPLE_EMBEDDED_BEAMS: EmbeddedBeam[] = [
+    {
+        id: 'beam_1',
+        materialId: 'bmat_default',
+        points: [
+            { x: 0, y: 3.5 },
+            { x: 0, y: -1.5 }
+        ]
+    }
 ];
 
 export const DEFAULT_BEAM_MATERIALS: EmbeddedBeamMaterial[] = [
     {
         id: 'bmat_default',
-        name: 'Standard Pile',
+        name: 'Spun Pile 500',
         color: '#f59e0b', // amber-500
-        youngsModulus: 30000000,
-        crossSectionArea: 0.2,
-        momentOfInertia: 0.005,
-        unitWeight: 7.85,
-        spacing: 2.0,
+        youngsModulus: 24000000,
+        crossSectionArea: 0.1159,
+        momentOfInertia: 0.00255324,
+        unitWeight: 2.9518,
+        spacing: 1.5,
         skinFrictionMax: 100,
         tipResistanceMax: 500
     }
@@ -213,85 +161,53 @@ export const SAMPLE_PHASES: PhaseRequest[] = [
         id: 'phase_0',
         name: 'Initial (K0 Procedure)',
         phase_type: PhaseType.K0_PROCEDURE,
-        active_polygon_indices: [0, 1], // Bottom soil and structures
+        active_polygon_indices: [0, 1, 2], // Bottom soil and structures
         active_load_ids: [],
         active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: {},  // No parent
+        active_beam_ids: [],
     },
     {
         id: 'phase_1',
-        name: 'Fill 1',
+        name: 'Foundation',
         phase_type: PhaseType.PLASTIC,
         parent_id: 'phase_0',
-        active_polygon_indices: [0, 1, 2, 3], // Add another layer
+        active_polygon_indices: [0, 1, 2], // Add another layer
         active_load_ids: [],
         active_water_level_id: 'wl_default',
         reset_displacements: true,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
+        active_beam_ids: ['beam_1'],
     },
     {
         id: 'phase_2',
-        name: 'Foundation',
+        name: 'Load',
         phase_type: PhaseType.PLASTIC,
         parent_id: 'phase_1',
-        active_polygon_indices: [0, 1, 2, 3, 8],
-        active_load_ids: [''], // Assuming some load ID exists
+        active_polygon_indices: [0, 1, 2],
+        active_load_ids: ['load_1'], // Assuming some load ID exists
         active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
+        active_beam_ids: ['beam_1'],
     },
     {
         id: 'phase_3',
-        name: 'Fill 2',
-        phase_type: PhaseType.PLASTIC,
-        parent_id: 'phase_2',
-        active_polygon_indices: [0, 1, 2, 3, 4, 5, 8],
-        active_load_ids: [''], // Assuming some load ID exists
-        active_water_level_id: 'wl_default',
-        reset_displacements: false,
-        current_material: { ...BASE_MATERIAL_MAP },
-        parent_material: { ...BASE_MATERIAL_MAP },
-    },
-    {
-        id: 'phase_4',
-        name: 'Fill 3',
-        phase_type: PhaseType.PLASTIC,
-        parent_id: 'phase_3',
-        active_polygon_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
-        active_load_ids: [''], // Assuming some load ID exists
-        active_water_level_id: 'wl_default',
-        reset_displacements: false,
-        current_material: { ...BASE_MATERIAL_MAP },
-        parent_material: { ...BASE_MATERIAL_MAP },
-    },
-    {
-        id: 'phase_5',
-        name: 'Load',
-        phase_type: PhaseType.PLASTIC,
-        parent_id: 'phase_4',
-        active_polygon_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
-        active_load_ids: ['load_1'], // Assuming some load ID exists
-        active_water_level_id: 'wl_default',
-        reset_displacements: false,
-        current_material: { ...BASE_MATERIAL_MAP },
-        parent_material: { ...BASE_MATERIAL_MAP },
-    },
-    {
-        id: 'phase_6',
         name: 'SF',
         phase_type: PhaseType.SAFETY_ANALYSIS,
-        parent_id: 'phase_5',
-        active_polygon_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+        parent_id: 'phase_2',
+        active_polygon_indices: [0, 1, 2],
         active_load_ids: ['load_1'], // Assuming some load ID exists
         active_water_level_id: 'wl_default',
         reset_displacements: false,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: { ...BASE_MATERIAL_MAP },
-    }
+        active_beam_ids: ['beam_1'],
+    },
 ];
 
 export const SAMPLE_GENERAL_SETTINGS: GeneralSettings = {
@@ -306,12 +222,13 @@ export const SAMPLE_MESH_SETTINGS: MeshSettings = {
     boundary_refinement_factor: 0.5,
 };
 
-export const SAMPLE_FOUNDATION = {
-    name: "Foundation Sample",
+export const SAMPLE_DEEP_FOUNDATION = {
+    name: "Deep Foundation Sample",
     materials: SAMPLE_MATERIALS,
     polygons: SAMPLE_POLYGONS,
     pointLoads: SAMPLE_POINT_LOADS,
     beamMaterials: DEFAULT_BEAM_MATERIALS,
+    embeddedBeams: SAMPLE_EMBEDDED_BEAMS,
     phases: SAMPLE_PHASES,
     waterLevels: SAMPLE_WATER_LEVELS,
     lineLoads: [],

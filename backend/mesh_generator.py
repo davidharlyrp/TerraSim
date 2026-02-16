@@ -1,5 +1,6 @@
 import numpy as np
 import triangle
+import math
 from typing import List, Dict, Tuple, Optional
 from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint
 from scipy.spatial import cKDTree
@@ -144,32 +145,50 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
 
         # 2. Define Regions (Materials) - Still using original polygons for point-in-poly
         print(f"Defining {len(request.polygons)} regions...", flush=True)
+        from shapely.ops import split
+        from shapely.geometry import LineString, MultiLineString
+
+        # Collect EBR lines for splitting polygons
+        beam_geoms = []
+        if request.embedded_beams:
+            for beam in request.embedded_beams:
+                if len(beam.points) < 2: continue
+                for i in range(len(beam.points) - 1):
+                    p1, p2 = beam.points[i], beam.points[i+1]
+                    beam_geoms.append(LineString([(p1.x, p1.y), (p2.x, p2.y)]))
+        
+        merged_beams = MultiLineString(beam_geoms) if beam_geoms else None
+
         for poly_idx, poly in enumerate(request.polygons):
-            # Find a point inside the polygon
-            shapely_poly = ShapelyPolygon([(p.x, p.y) for p in poly.vertices])
+            coords = [(v.x, v.y) for v in poly.vertices]
+            if not coords: continue
+            if coords[0] != coords[-1]: coords.append(coords[0])
+            shapely_poly = ShapelyPolygon(coords)
             if shapely_poly.is_empty: continue
-            
-            # representative_point is guaranteed to be within the polygon
-            inner_pt = shapely_poly.representative_point()
             
             target_mesh_size = poly.mesh_size if poly.mesh_size else global_mesh_size
             max_area = 0.5 * (target_mesh_size ** 2)
-            
-            # Safety: Don't allow area to be too small relative to model bounding box
-            # This prevents accidental element explosion
-            # If model is 100x100, area is 10000. 10000 / 0.5 = 20k elements.
-            # If user sets mesh_size = 0.01, max_area = 0.00005. 10k / 0.00005 = 200M elements (DEAD).
             MIN_AREA = 1e-4 
             if max_area < MIN_AREA:
-                print(f"WARNING: max_area {max_area} for poly {poly_idx} is too small, capping to {MIN_AREA}", flush=True)
                 max_area = MIN_AREA
 
-            mat_idx = 0
-            if poly.materialId in material_id_map:
-                mat_idx = material_id_map[poly.materialId]
-            
-            regions.append([inner_pt.x, inner_pt.y, float(poly_idx), max_area])
-            print(f"  Region {poly_idx}: at ({inner_pt.x:.2f}, {inner_pt.y:.2f}), max_area={max_area:.4f}", flush=True)
+            # If beams exist, split the polygon to ensure every "part" gets a region point
+            parts = [shapely_poly]
+            if merged_beams:
+                try:
+                    split_result = split(shapely_poly, merged_beams)
+                    parts = [g for g in split_result.geoms if g.geom_type == 'Polygon']
+                    if not parts: parts = [shapely_poly]
+                except Exception as e:
+                    print(f"Warning: split failed for poly {poly_idx}: {e}", flush=True)
+                    parts = [shapely_poly]
+
+            for part in parts:
+                inner_pt = part.representative_point()
+                # Round to improve symmetry
+                rx, ry = round(inner_pt.x, 6), round(inner_pt.y, 6)
+                regions.append([rx, ry, float(poly_idx), max_area])
+                print(f"  Region {poly_idx} part: at ({rx:.2f}, {ry:.2f}), max_area={max_area:.4f}", flush=True)
 
         # --- NEW: Add Point Load Coordinates to Vertices ---
         # This forces triangle to create a node at exactly these coordinates.
@@ -183,6 +202,29 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
                 v1 = get_vertex_index(ll.x1, ll.y1)
                 v2 = get_vertex_index(ll.x2, ll.y2)
                 all_segments.append(tuple(sorted((v1, v2))))
+        
+        # --- NEW: Add Embedded Beam Segments to Vertices and Segments ---
+        if request.embedded_beams:
+            for beam in request.embedded_beams:
+                if len(beam.points) < 2: continue
+                for i in range(len(beam.points) - 1):
+                    p1, p2 = beam.points[i], beam.points[i+1]
+                    
+                    dx = p2.x - p1.x
+                    dy = p2.y - p1.y
+                    dist = math.sqrt(dx*dx + dy*dy)
+                    
+                    num_sub = 1
+                    if global_mesh_size > 0:
+                        num_sub = max(1, math.ceil(dist / global_mesh_size))
+                    
+                    last_v = get_vertex_index(p1.x, p1.y)
+                    for s in range(1, num_sub + 1):
+                        px = p1.x + dx * (s / num_sub)
+                        py = p1.y + dy * (s / num_sub)
+                        curr_v = get_vertex_index(px, py)
+                        all_segments.append(tuple(sorted((last_v, curr_v))))
+                        last_v = curr_v
 
         # Deduplicate segments
         unique_segments = list(set(all_segments))
@@ -327,6 +369,10 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
                 # Query nearest node within reasonable distance
                 dist, node_idx = tree.query([pl.x, pl.y])
                 
+                # Check for misalignment
+                if dist > 0.1:
+                    print(f"WARNING: Point load '{pl.id}' at ({pl.x}, {pl.y}) is {dist:.4f}m away from the nearest node!", flush=True)
+                
                 point_load_assigns.append(PointLoadAssignment(
                     point_load_id=pl.id,
                     assigned_node_id=int(node_idx) + 1 # FE uses 1-based IDs for nodes in this context
@@ -373,6 +419,51 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
                                 edge_nodes=[int(na)+1, int(nb)+1, int(nm)+1]
                             ))
 
+        # E. Embedded Beams
+        embedded_beam_assigns = []
+        from backend.models import EmbeddedBeamAssignment
+        if request.embedded_beams and nodes:
+            node_arr = np.array(nodes)
+            for beam in request.embedded_beams:
+                beam_nodes = []
+                if len(beam.points) < 2: continue
+                
+                # For each segment of the beam chain
+                for i in range(len(beam.points) - 1):
+                    p_start = np.array([beam.points[i].x, beam.points[i].y])
+                    p_end = np.array([beam.points[i+1].x, beam.points[i+1].y])
+                    
+                    segment_vec = p_end - p_start
+                    segment_len = np.linalg.norm(segment_vec)
+                    if segment_len < 1e-9: continue
+                    segment_unit = segment_vec / segment_len
+                    
+                    # Find all nodes lying on this segment
+                    segment_node_indices = []
+                    for n_idx, n_coords in enumerate(node_arr):
+                        # Use is_on_segment logic
+                        p = np.array(n_coords)
+                        v = p - p_start
+                        proj = np.dot(v, segment_unit)
+                        if proj < -1e-4 or proj > segment_len + 1e-4: continue
+                        dist = np.linalg.norm(v - proj * segment_unit)
+                        if dist < 1e-4:
+                            segment_node_indices.append((n_idx, proj))
+                    
+                    # Sort nodes by distance from start of segment
+                    segment_node_indices.sort(key=lambda x: x[1])
+                    
+                    # Add to beam_nodes (deduplicating if needed, though sequential segments share end/start)
+                    for n_idx, _ in segment_node_indices:
+                        if not beam_nodes or beam_nodes[-1] != n_idx + 1:
+                            beam_nodes.append(n_idx + 1) # 1-based
+                
+                if len(beam_nodes) > 1:
+                    embedded_beam_assigns.append(EmbeddedBeamAssignment(
+                        beam_id=beam.id,
+                        nodes=beam_nodes
+                    ))
+
         return MeshResponse(
             success=True,
             nodes=nodes,
@@ -383,6 +474,7 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
             ),
             point_load_assignments=point_load_assigns,
             line_load_assignments=line_load_assigns,
+            embedded_beam_assignments=embedded_beam_assigns,
             element_materials=element_materials
         )
 
@@ -396,6 +488,7 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
             boundary_conditions=BoundaryConditionsResponse(full_fixed=[], normal_fixed=[]),
             point_load_assignments=[],
             line_load_assignments=[],
+            embedded_beam_assignments=[],
             element_materials=[],
             error=f"{get_error_info(ErrorCode.SYS_INTERNAL_ERROR)} | Raw: {str(e)}"
         )

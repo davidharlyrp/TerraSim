@@ -1,6 +1,7 @@
 
 import { SAMPLE_FOUNDATION } from './sample_Foundation';
 import { SAMPLE_RETAINING_WALL } from './sample_RetainingWall';
+import { SAMPLE_DEEP_FOUNDATION } from './sample_Deep_Foundation';
 
 export interface SampleManifest {
     id: string;
@@ -21,5 +22,11 @@ export const AVAILABLE_SAMPLES: SampleManifest[] = [
         name: 'Retaining Wall Embankment',
         description: 'Simple embankment with retaining wall, multiple fill stages, and line loads.',
         data: SAMPLE_RETAINING_WALL
+    },
+    {
+        id: 'deep_foundation',
+        name: 'Deep Foundation',
+        description: 'Deep foundation with pile and line loads.',
+        data: SAMPLE_DEEP_FOUNDATION
     }
 ];
