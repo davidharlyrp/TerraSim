@@ -1095,6 +1095,7 @@ function MainApp() {
                                             phases={phases}
                                             currentPhaseIdx={currentPhaseIdx}
                                             onSelectPhase={setCurrentPhaseIdx}
+                                            runningPhaseIdx={solverResponse?.phases.length || 0}
                                         />
                                     </div>
                                 )}
@@ -1108,6 +1109,7 @@ function MainApp() {
                                         currentPhaseIdx={currentPhaseIdx}
                                         onSelectPhase={setCurrentPhaseIdx}
                                         liveStepPoints={liveStepPoints}
+                                        runningPhaseIdx={solverResponse?.phases.length || 0}
                                     />
                                 )}
                             </div>

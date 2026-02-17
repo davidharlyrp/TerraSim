@@ -126,7 +126,7 @@ const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: Step
 };
 
 
-const ResultSummary = ({ phaseResult, prevPhaseResult, isReset }: { phaseResult: any, prevPhaseResult?: any, isReset: boolean }) => {
+const ResultSummary = ({ phaseResult, prevPhaseResult, isReset, phaseType }: { phaseResult: any, prevPhaseResult?: any, isReset: boolean, phaseType?: PhaseType }) => {
     if (!phaseResult) return null;
 
     const summary = React.useMemo(() => {
@@ -189,6 +189,14 @@ const ResultSummary = ({ phaseResult, prevPhaseResult, isReset }: { phaseResult:
                 </div>
             )}
 
+            {phaseType === PhaseType.SAFETY_ANALYSIS && (
+                <div className="group flex justify-between items-center py-1.5 border-b border-slate-200 dark:border-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors px-1 rounded">
+                    <span className="text-[10px] text-slate-600 dark:text-slate-400 font-medium">Safety Factor</span>
+                    <div className="flex items-center gap-2 text-[10px] font-mono">
+                        <span className="text-emerald-600 dark:text-emerald-400/80">{phaseResult.reached_m_stage?.toFixed(3)}</span>
+                    </div>
+                </div>
+            )}
             <CompactRow label="Displacement" values={summary.disp} unit="m" />
             <CompactRow label="σ1 Total" values={summary.s1} />
             <CompactRow label="σ3 Total" values={summary.s3} />
@@ -214,11 +222,12 @@ interface ResultSidebarProps {
     phases: PhaseRequest[];
     currentPhaseIdx: number;
     onSelectPhase: (idx: number) => void;
-    liveStepPoints?: StepPoint[]; // NEW
+    liveStepPoints?: StepPoint[];
+    runningPhaseIdx?: number;
 }
 
 export const ResultSidebar: React.FC<ResultSidebarProps> = ({
-    solverResult, isRunning, onRun, onCancel, phases, currentPhaseIdx, onSelectPhase, liveStepPoints = []
+    solverResult, isRunning, onRun, onCancel, phases, currentPhaseIdx, onSelectPhase, liveStepPoints = [], runningPhaseIdx = 0
 }) => {
     const isReset = phases[currentPhaseIdx]?.reset_displacements || false;
     const prevPhaseResult = currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null;
@@ -283,7 +292,7 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                         <PhaseChart
                             points={processedLivePoints}
                             isLive={true}
-                            isSafety={phases[currentPhaseIdx]?.phase_type === PhaseType.SAFETY_ANALYSIS}
+                            isSafety={phases[runningPhaseIdx]?.phase_type === PhaseType.SAFETY_ANALYSIS}
                         />
                     </div>
                 )}
@@ -325,11 +334,12 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                             </div>
                         </div>
 
-                        <div className="border-t border-slate-200 dark:border-slate-800 pb-30">
+                        <div className="border-t border-slate-200 dark:border-slate-800 md:pb-5 pb-30">
                             <ResultSummary
                                 phaseResult={solverResult.phases[currentPhaseIdx]}
                                 prevPhaseResult={prevPhaseResult}
                                 isReset={isReset}
+                                phaseType={phases[currentPhaseIdx]?.phase_type}
                             />
                         </div>
                     </>
