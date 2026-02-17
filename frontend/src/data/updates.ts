@@ -7,9 +7,11 @@ export interface SoftwareUpdate {
 export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
     {
         version: "v 0.4.0",
-        date: "2026-02-16",
+        date: "2026-02-17",
         changes: [
             "add embeded beam",
+            "add Gravity Loading for initial phase",
+            "add reset displacement features",
             "bug fixes"
         ]
     },

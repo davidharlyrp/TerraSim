@@ -80,6 +80,10 @@ export interface EmbeddedBeamMaterial {
     spacing: number; // L_spacing
     skinFrictionMax: number; // T_max
     tipResistanceMax: number; // F_max
+    shape: string;
+    thickness?: number;
+    width?: number;
+    diameter?: number;
 }
 
 export interface EmbeddedBeam {

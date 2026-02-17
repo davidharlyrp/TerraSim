@@ -37,7 +37,8 @@ export const AuthModal: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-8 rounded-2xl shadow-2xl w-full max-w-md space-y-6">
                 <div className="text-center space-y-2">
-                    <img src="/Logo.png" alt="Logo" className="w-20 h-20 mx-auto" />
+                    {/* <img src="/Logo.png" alt="Logo" className="w-20 h-20 mx-auto" /> */}
+                    <img src="./Logo.png" alt="Logo" className="w-20 h-20 mx-auto" />
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Terra Sim</h2>
                     <p className="text-slate-500 dark:text-slate-400 text-sm">Please sign in to continue</p>
                 </div>

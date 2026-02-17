@@ -190,7 +190,7 @@ const PhaseTreeItem: React.FC<PhaseTreeItemProps> = ({
                                 {idx === 0 ? (
                                     <>
                                         <option value={PhaseType.K0_PROCEDURE}>K0 Procedure (Stress Init)</option>
-                                        <option value={PhaseType.GRAVITY_LOADING} disabled>Gravity Loading (Total Stress)</option>
+                                        <option value={PhaseType.GRAVITY_LOADING}>Gravity Loading (Total Stress)</option>
                                     </>
                                 ) : (
                                     <>
@@ -241,6 +241,11 @@ const PhaseTreeItem: React.FC<PhaseTreeItemProps> = ({
                                             }
                                         }
 
+                                        // Auto reset displacement if parent is Initial Phase
+                                        if (newParentId === allPhases[0]?.id) {
+                                            updatedPhase.reset_displacements = true;
+                                        }
+
                                         newPhases[idx] = updatedPhase;
                                         onPhasesChange(newPhases);
                                     }}
@@ -250,6 +255,25 @@ const PhaseTreeItem: React.FC<PhaseTreeItemProps> = ({
                                         <option key={ph.id} value={ph.id}>{ph.name}</option>
                                     ))}
                                 </select>
+                            </div>
+                        )}
+
+                        {idx > 0 && (
+                            <div className="flex items-center justify-between gap-2">
+                                <label className="itemlabel">Reset Displacements</label>
+                                <input
+                                    type="checkbox"
+                                    checked={phase.reset_displacements || false}
+                                    onChange={(e) => {
+                                        const newResetDisplacements = e.target.checked;
+                                        const newPhases = [...allPhases];
+                                        const updatedPhase = { ...phase, reset_displacements: newResetDisplacements };
+
+                                        newPhases[idx] = updatedPhase;
+                                        onPhasesChange(newPhases);
+                                    }}
+                                    className="w-fit mx-auto bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white border border-slate-300 dark:border-white/10 rounded px-2 py-1.5 text-[10px] outline-none hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                                />
                             </div>
                         )}
                     </div>
@@ -451,7 +475,7 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
     };
 
     return (
-        <div className="md:w-full w-[calc(100vw-40px)] md:h-full h-[calc(100vh-50px)] pb-30 p-2 overflow-y-auto flex flex-col gap-2 border-r md:border-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 custom-scrollbar">
+        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100vh-50px)] pb-30 p-2 overflow-y-auto flex flex-col gap-2 border-r md:border-0 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 md:custom-scrollbarleft custom-scrollbar">
             {/* PHASE */}
             <button
                 className="dropdownlabel2"
@@ -488,7 +512,8 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
                                 active_beam_ids: lastPhase?.active_beam_ids ? [...lastPhase.active_beam_ids] : [],
                                 parent_material: lastPhase ? { ...lastPhase.current_material } : {},
                                 current_material: lastPhase ? { ...lastPhase.current_material } : {},
-                                parent_id: parentId // Default parent is the previous phase
+                                parent_id: parentId, // Default parent is the previous phase
+                                reset_displacements: (parentId && phases[0] && parentId === phases[0].id) ? true : false,
                             };
                             onPhasesChange([...phases, newPhase]);
                             onPhasesChange([...phases, newPhase]);

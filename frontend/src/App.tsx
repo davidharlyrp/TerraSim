@@ -482,7 +482,12 @@ function MainApp() {
                         setSolverResponse(null);
                         setActiveTab(WizardTab.INPUT);
 
-                        showAlert("Project Load Success", "Project loaded successfully!", 'success');
+                        if (projectFile.version !== APP_VERSION) {
+                            showAlert("Project Load Warning", `Project loaded successfully!\n\nProject version (${projectFile.version}) is older than the current version (${APP_VERSION}), some features may not work as expected.\n\nPlease make sure every model is updated to the current version.`, 'warning');
+                        }
+                        else {
+                            showAlert("Project Load Success", "Project loaded successfully!", 'success');
+                        }
                     } catch (err) {
                         console.error("Failed to load project:", err);
                         showAlert("Project Load Error", "Failed to load project file. Invalid format.", 'error');
@@ -629,6 +634,12 @@ function MainApp() {
                     setMeshResponse(null);
                     setSolverResponse(null);
                     setActiveTab(WizardTab.INPUT);
+                    if (projectData.version !== APP_VERSION) {
+                        showAlert("Project Load Warning", `Project loaded successfully!\n\nProject version (${projectData.version}) is older than the current version (${APP_VERSION}), some features may not work as expected.\n\nPlease make sure every model is updated to the current version.`, 'warning');
+                    }
+                    else {
+                        showAlert("Project Load Success", "Project loaded successfully!", 'success');
+                    }
                 } catch (err) {
                     console.error("Failed to load project:", err);
                     showAlert("Cloud Load Error", "Failed to load project data.", 'error');
@@ -770,6 +781,7 @@ function MainApp() {
     const [meshSideBarOpen, setMeshSideBarOpen] = useState(false);
     const [stagingSideBarOpen, setStagingSideBarOpen] = useState(false);
     const [resultSideBarOpen, setResultSideBarOpen] = useState(false);
+    const [SideBarDesktopOpen, setSideBarDesktopOpen] = useState(true);
     const isWindowSizeSmall = window.innerWidth < 768;
     const isInputTab = activeTab === WizardTab.INPUT || activeTab === WizardTab.MESH || activeTab === WizardTab.STAGING;
 
@@ -801,7 +813,12 @@ function MainApp() {
             <div className="flex-1 flex overflow-hidden relative">
 
                 {isInputTab && (
-                    <div className="flex h-full z-10 md:w-[400px] w-0">
+                    <div className={`flex h-full z-10 transition ${(!isWindowSizeSmall && !SideBarDesktopOpen) ? 'w-0' : 'md:w-[400px] w-0'}`}>
+                        <div className={`md:block hidden absolute top-1 w-10 p-2 z-10  ${SideBarDesktopOpen ? 'translate-x-[calc(400px)]' : 'translate-x-0'} transition`}>
+                            <button onClick={() => setSideBarDesktopOpen(!SideBarDesktopOpen)}>
+                                <PanelLeftClose className={`w-6 h-6 cursor-pointer ${SideBarDesktopOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                        </div>
                         {activeTab === WizardTab.INPUT && (
                             <>
                                 <InputToolbar
@@ -849,36 +866,38 @@ function MainApp() {
                                     </div>
                                 )}
                                 {!isWindowSizeSmall && (
-                                    <InputSidebar
-                                        materials={materials}
-                                        beamMaterials={beamMaterials} // NEW
-                                        polygons={polygons}
-                                        pointLoads={pointLoads}
-                                        lineLoads={lineLoads}
-                                        embeddedBeams={embeddedBeams} // NEW
-                                        waterLevels={waterLevels} // NEW
-                                        onUpdateMaterials={setMaterials}
-                                        onUpdateBeamMaterials={setBeamMaterials} // NEW
-                                        onUpdatePolygons={setPolygons}
-                                        onUpdateLoads={setPointLoads}
-                                        onUpdateLineLoads={setLineLoads}
-                                        onUpdateEmbeddedBeams={setEmbeddedBeams} // NEW
-                                        onAddWaterLevel={handleAddWaterLevel} // NEW
-                                        onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
-                                        onDeleteWaterPoint={handleDeleteWaterPoint} // NEW
-                                        onUpdatePolygonPoints={handleUpdatePolygonPoints}
-                                        onEditMaterial={setEditingMaterial}
-                                        onEditBeamMaterial={(mat) => setEditingBeamMaterial(mat)} // NEW
-                                        onDeleteMaterial={handleDeleteMaterial}
-                                        onDeleteBeamMaterial={handleDeleteBeamMaterial} // NEW
-                                        onDeletePolygon={handleDeletePolygon}
-                                        onDeleteLoad={handleDeleteLoad}
-                                        onDeleteLineLoad={handleDeleteLoad}
-                                        onDeleteEmbeddedBeam={handleDeleteEmbeddedBeam} // NEW
-                                        onDeleteWaterLevel={handleDeleteWaterLevel}
-                                        selectedEntity={selectedEntity}
-                                        onSelectEntity={setSelectedEntity}
-                                    />
+                                    <div className={`absolute top-0 bottom-0 left-0 z-10 ${SideBarDesktopOpen ? 'translate-x-0' : '-translate-x-[calc(400px)]'} transition`}>
+                                        <InputSidebar
+                                            materials={materials}
+                                            beamMaterials={beamMaterials} // NEW
+                                            polygons={polygons}
+                                            pointLoads={pointLoads}
+                                            lineLoads={lineLoads}
+                                            embeddedBeams={embeddedBeams} // NEW
+                                            waterLevels={waterLevels} // NEW
+                                            onUpdateMaterials={setMaterials}
+                                            onUpdateBeamMaterials={setBeamMaterials} // NEW
+                                            onUpdatePolygons={setPolygons}
+                                            onUpdateLoads={setPointLoads}
+                                            onUpdateLineLoads={setLineLoads}
+                                            onUpdateEmbeddedBeams={setEmbeddedBeams} // NEW
+                                            onAddWaterLevel={handleAddWaterLevel} // NEW
+                                            onUpdateWaterLevel={handleUpdateWaterLevel} // NEW
+                                            onDeleteWaterPoint={handleDeleteWaterPoint} // NEW
+                                            onUpdatePolygonPoints={handleUpdatePolygonPoints}
+                                            onEditMaterial={setEditingMaterial}
+                                            onEditBeamMaterial={(mat) => setEditingBeamMaterial(mat)} // NEW
+                                            onDeleteMaterial={handleDeleteMaterial}
+                                            onDeleteBeamMaterial={handleDeleteBeamMaterial} // NEW
+                                            onDeletePolygon={handleDeletePolygon}
+                                            onDeleteLoad={handleDeleteLoad}
+                                            onDeleteLineLoad={handleDeleteLoad}
+                                            onDeleteEmbeddedBeam={handleDeleteEmbeddedBeam} // NEW
+                                            onDeleteWaterLevel={handleDeleteWaterLevel}
+                                            selectedEntity={selectedEntity}
+                                            onSelectEntity={setSelectedEntity}
+                                        />
+                                    </div>
                                 )}
                             </>
                         )}
@@ -902,13 +921,15 @@ function MainApp() {
                                     </div>
                                 )}
                                 {!isWindowSizeSmall && (
-                                    <MeshSidebar
-                                        mesh={meshResponse}
-                                        isGenerating={isGeneratingMesh}
-                                        onGenerate={handleGenerateMesh}
-                                        meshSettings={meshSettings}
-                                        onSettingsChange={setMeshSettings}
-                                    />
+                                    <div className={`absolute top-0 bottom-0 left-0 z-10 ${SideBarDesktopOpen ? 'translate-x-0' : '-translate-x-[calc(400px)]'} transition`}>
+                                        <MeshSidebar
+                                            mesh={meshResponse}
+                                            isGenerating={isGeneratingMesh}
+                                            onGenerate={handleGenerateMesh}
+                                            meshSettings={meshSettings}
+                                            onSettingsChange={setMeshSettings}
+                                        />
+                                    </div>
                                 )}
                             </>
                         )}
@@ -936,17 +957,19 @@ function MainApp() {
                                     </div>
                                 )}
                                 {!isWindowSizeSmall && (
-                                    <StagingSidebar
-                                        phases={phases}
-                                        currentPhaseIdx={currentPhaseIdx}
-                                        polygons={polygons}
-                                        pointLoads={pointLoads}
-                                        lineLoads={lineLoads}
-                                        embeddedBeams={embeddedBeams}
-                                        waterLevels={waterLevels} // NEW
-                                        onPhasesChange={setPhases}
-                                        onSelectPhase={setCurrentPhaseIdx}
-                                    />
+                                    <div className={`absolute top-0 bottom-0 left-0 z-10 ${SideBarDesktopOpen ? 'translate-x-0' : '-translate-x-[calc(400px)]'} transition`}>
+                                        <StagingSidebar
+                                            phases={phases}
+                                            currentPhaseIdx={currentPhaseIdx}
+                                            polygons={polygons}
+                                            pointLoads={pointLoads}
+                                            lineLoads={lineLoads}
+                                            embeddedBeams={embeddedBeams}
+                                            waterLevels={waterLevels} // NEW
+                                            onPhasesChange={setPhases}
+                                            onSelectPhase={setCurrentPhaseIdx}
+                                        />
+                                    </div>
                                 )}
                             </>
                         )}

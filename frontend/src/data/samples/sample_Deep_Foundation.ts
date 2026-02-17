@@ -111,7 +111,7 @@ export const SAMPLE_POINT_LOADS: PointLoad[] = [
 export const SAMPLE_EMBEDDED_BEAMS: EmbeddedBeam[] = [
     {
         id: 'beam_1',
-        materialId: 'bmat_default',
+        materialId: 'bmat_spun_pile_500',
         points: [
             { x: 0, y: 3.5 },
             { x: 0, y: -1.5 }
@@ -121,7 +121,7 @@ export const SAMPLE_EMBEDDED_BEAMS: EmbeddedBeam[] = [
 
 export const DEFAULT_BEAM_MATERIALS: EmbeddedBeamMaterial[] = [
     {
-        id: 'bmat_default',
+        id: 'bmat_spun_pile_500',
         name: 'Spun Pile 500',
         color: '#f59e0b', // amber-500
         youngsModulus: 24000000,
@@ -130,7 +130,8 @@ export const DEFAULT_BEAM_MATERIALS: EmbeddedBeamMaterial[] = [
         unitWeight: 2.9518,
         spacing: 1.5,
         skinFrictionMax: 100,
-        tipResistanceMax: 500
+        tipResistanceMax: 500,
+        shape: 'user_defined'
     }
 ];
 
@@ -159,12 +160,12 @@ const BASE_MATERIAL_MAP = buildMaterialMap();
 export const SAMPLE_PHASES: PhaseRequest[] = [
     {
         id: 'phase_0',
-        name: 'Initial (K0 Procedure)',
+        name: 'Initial Phase',
         phase_type: PhaseType.K0_PROCEDURE,
         active_polygon_indices: [0, 1, 2], // Bottom soil and structures
         active_load_ids: [],
         active_water_level_id: 'wl_default',
-        reset_displacements: false,
+        reset_displacements: true,
         current_material: { ...BASE_MATERIAL_MAP },
         parent_material: {},  // No parent
         active_beam_ids: [],

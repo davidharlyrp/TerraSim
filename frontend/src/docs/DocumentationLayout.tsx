@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
-import { ChevronRight, Menu, X, BookOpen, User, ArrowLeft, FunctionSquare } from 'lucide-react';
+import { ChevronRight, Menu, X, ArrowLeft } from 'lucide-react';
 import { APP_VERSION } from '../version';
 
 export const DocumentationLayout: React.FC = () => {
@@ -15,9 +15,9 @@ export const DocumentationLayout: React.FC = () => {
     }, [pathname]);
 
     const navItems = [
-        { path: 'introduction', label: 'Introduction', icon: <BookOpen className="w-4 h-4" /> },
-        { path: 'user-manual', label: 'User Manual', icon: <User className="w-4 h-4" /> },
-        { path: 'scientific-reference', label: 'Scientific Reference', icon: <FunctionSquare className="w-4 h-4" /> },
+        { path: 'introduction', label: 'Introduction' },
+        { path: 'user-manual', label: 'User Manual' },
+        { path: 'scientific-reference', label: 'Scientific Reference' },
     ];
 
     return (
@@ -44,7 +44,7 @@ export const DocumentationLayout: React.FC = () => {
                                 <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider mt-1">Documentation</p>
                             </div>
                         </Link>
-                        <button className="lg:hidden text-slate-400" onClick={() => setIsSidebarOpen(false)}>
+                        <button className="cursor-pointer lg:hidden text-slate-400" onClick={() => setIsSidebarOpen(false)}>
                             <X className="w-6 h-6" />
                         </button>
                     </div>
@@ -72,9 +72,6 @@ export const DocumentationLayout: React.FC = () => {
                                 `}
                                 onClick={() => setIsSidebarOpen(false)}
                             >
-                                <span className="p-1.5 rounded-lg bg-slate-800 group-hover:bg-slate-700 transition-colors">
-                                    {item.icon}
-                                </span>
                                 <span className="text-sm font-medium flex-1">{item.label}</span>
                                 <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
                             </NavLink>
@@ -100,7 +97,7 @@ export const DocumentationLayout: React.FC = () => {
                         <span className="font-bold text-white text-sm tracking-widest">Documentation</span>
                     </div>
                     <button
-                        className="p-2 bg-slate-800 rounded-lg text-white active:scale-95 transition-transform"
+                        className="cursor-pointer p-2 bg-slate-800 rounded-lg text-white active:scale-95 transition-transform"
                         onClick={() => setIsSidebarOpen(true)}
                     >
                         <Menu className="w-6 h-6" />

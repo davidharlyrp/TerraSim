@@ -21,7 +21,7 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({ activeTab, o
 
     return (
         <div className="flex md:flex-row flex-col gap-2 pt-2 px-4 bg-slate-50 dark:bg-slate-900">
-            <div className="flex justify-between gap-2 px-2 md:px-0 mx-10 md:mx-0">
+            <div className="flex justify-between gap-2 px-2 mx-10 md:mx-5">
                 {tabs.map(tab => {
                     const isActive = activeTab === tab.id;
                     return (

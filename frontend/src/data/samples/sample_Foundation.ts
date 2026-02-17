@@ -182,7 +182,8 @@ export const DEFAULT_BEAM_MATERIALS: EmbeddedBeamMaterial[] = [
         unitWeight: 7.85,
         spacing: 2.0,
         skinFrictionMax: 100,
-        tipResistanceMax: 500
+        tipResistanceMax: 500,
+        shape: 'user_defined',
     }
 ];
 

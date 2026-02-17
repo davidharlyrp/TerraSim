@@ -140,7 +140,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ onClose }) => {
                                     <button
                                         type="button"
                                         onClick={() => fileInputRef.current?.click()}
-                                        className="cursor-pointer text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 transition-colors tracking-widest flex items-center gap-1.5"
+                                        className="cursor-pointer text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 transition-colors flex items-center gap-1.5"
                                     >
                                         <ImageIcon className="w-3 h-3" />
                                         Upload Images

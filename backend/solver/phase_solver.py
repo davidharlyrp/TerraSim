@@ -79,6 +79,7 @@ def compute_elements_stresses_numba(
     mat_a_arr,
     penalties_arr,
     is_srm,
+    is_gravity_phase,
     target_m_stage,
     num_dof
 ):
@@ -182,7 +183,10 @@ def compute_elements_stresses_numba(
                 sigma_eff_start = sigma_total_start - np.array([p_static, p_static, 0.0])
                 sigma_eff_trial = sigma_eff_start + D_el @ d_epsilon_step
                 
-                if mmodel == 1:
+                # Refined Elastic Gravity: Skip yield check if gravity phase and drained
+                skip_yield = is_gravity_phase and (dtype == 0)
+
+                if mmodel == 1 and not skip_yield:
                     c_eff = c_val; phi_eff = phi_val
                     if is_srm:
                         c_eff /= target_m_stage
@@ -194,7 +198,7 @@ def compute_elements_stresses_numba(
                         sigma_eff_trial[0], sigma_eff_trial[1], sigma_eff_trial[2],
                         c_eff, phi_eff, D_el
                     )
-                elif mmodel == 2: # Hoek-Brown
+                elif mmodel == 2 and not skip_yield: # Hoek-Brown
                     sig_ci_f = sigma_ci_val
                     mb_f = mb_val
                     s_f = s_val
@@ -1132,7 +1136,15 @@ def solve_phases(request: SolverRequest, should_stop=None):
             MaterialModel.MOHR_COULOMB: 1,
             MaterialModel.HOEK_BROWN: 2
         }
+        
+        is_gravity_phase = phase.phase_type == PhaseType.GRAVITY_LOADING
         mat_model_arr = np.array([model_map.get(ep['material'].material_model, 0) for ep in active_elem_props], dtype=np.int32)
+        
+        if is_gravity_phase:
+            msg_el = f"  > Elastic Gravity enabled (Yield check skipped for Drained materials) in phase '{phase.name}'"
+            log.append(msg_el)
+            print(msg_el)
+            yield {"type": "log", "content": msg_el}
 
         # Hoek-Brown parameter preparation
         mat_sigma_ci_arr = []
@@ -1185,6 +1197,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         if phase.id in failed_phases:
             continue
 
+        m_type = "MStage" if not is_srm else "Msf"
         while (not is_srm and current_m_stage < 1.0) or (is_srm and current_m_stage < 100.0): 
             if should_stop and should_stop():
                 log.append("Analysis cancelled by user during MStage loop.")
@@ -1251,6 +1264,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     mat_a_arr,
                     penalties_arr,
                     is_srm,
+                    is_gravity_phase,
                     target_m_stage,
                     num_dof
                 )
@@ -1400,9 +1414,15 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     converged = False
                     break
             
+            # Calculate displacement magnitudes for this step attempt (whether converged or not)
+            trial_u = current_u_incremental + step_du
+            trial_u_reshaped = trial_u.reshape(-1, 2)
+            trial_magnitudes = np.sqrt(trial_u_reshaped[:,0]**2 + trial_u_reshaped[:,1]**2)
+            max_disp = np.float64(np.max(trial_magnitudes))
+
             if converged:
                 step_count += 1
-                current_u_incremental += step_du
+                current_u_incremental = trial_u
                 current_m_stage = target_m_stage
                 
                 for eid, stress in temp_phase_stress.items(): phase_stress_history[eid] = stress
@@ -1410,10 +1430,6 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 for eid, yld in temp_phase_yield.items(): phase_yield_history[eid] = yld
                 for eid, pexc in temp_phase_pwp_excess.items(): phase_pwp_excess_history[eid] = pexc
                 
-                u_reshaped = current_u_incremental.reshape(-1, 2)
-                magnitudes = np.sqrt(u_reshaped[:,0]**2 + u_reshaped[:,1]**2)
-                max_disp = np.float64(np.max(magnitudes))
-                m_type = "MStage" if not is_srm else "Msf"
                 msg = f"Phase {phase.name} | Step {step_count}: {m_type} {current_m_stage:.4f} | Max Incremental Disp: {max_disp:.6f} m | Iterations {iteration}"
                 log.append(msg)
                 yield {"type": "log", "content": msg}
@@ -1429,14 +1445,40 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 elif iteration > settings.max_desired_iterations: step_size *= 0.5
 
             else:
-                msg = f"Phase {phase.name} failed at step {step_count+1}. Final {m_type}: {current_m_stage:.4f}"
-                log.append(msg)
-                print(msg)
+                # Failure Diagnostics before cutting step size
+                msg_fail = f"Phase {phase.name} | Step {step_count+1} FAILED to converge after {iteration} iterations."
+                log.append(msg_fail)
+                print(msg_fail)
+                
+                # Identify worst node/DOF
+                abs_R = np.abs(R_free)
+                worst_idx = np.argmax(abs_R)
+                worst_val = abs_R[worst_idx]
+                global_dof = free_dofs[worst_idx]
+                node_id = (global_dof // 2) + 1
+                axis = "X" if global_dof % 2 == 0 else "Y"
+                
+                msg_detail = f"  > Final Residual Norm: {norm_R:.4f} | Max Displacement: {max_disp:.6f} m | (Rel: {norm_R/f_base:.6f} vs Tol: {settings.tolerance})"
+                msg_worst = f"  > Largest Out-of-balance: {worst_val:.4f} kN at Node {node_id} (DOF {axis})"
+                log.append(msg_detail)
+                log.append(msg_worst)
+                print(msg_detail)
+                print(msg_worst)
+                yield {"type": "log", "content": msg_detail}
+                yield {"type": "log", "content": msg_worst}
+
                 if step_size > (1e-4 if not is_srm else 0.001):
                      step_size *= 0.5
+                     msg_retry = f"  > Retrying with smaller step size: {step_size:.5f}"
+                     log.append(msg_retry)
+                     print(msg_retry)
+                     yield {"type": "log", "content": msg_retry}
                      continue
                 else:
-                    log.append(f"Step size too small ({step_size:.5f}). Aborting phase.")
+                    msg_abort = f"Step size too small ({step_size:.5f}). Aborting phase."
+                    log.append(msg_abort)
+                    print(msg_abort)
+                    yield {"type": "log", "content": msg_abort}
                     break
 
         # End of Phase Result Gathering

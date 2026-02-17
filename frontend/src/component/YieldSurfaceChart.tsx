@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Label } from 'recharts';
-import { Material, MaterialModel } from '../types';
+import { DrainageType, Material, MaterialModel } from '../types';
 
 interface YieldSurfaceChartProps {
     material: Material;
@@ -16,11 +16,18 @@ export const YieldSurfaceChart: React.FC<YieldSurfaceChartProps> = ({ material }
         if (material.material_model === MaterialModel.MOHR_COULOMB) {
             const phi = (material.frictionAngle || 0) * (Math.PI / 180);
             const cohesion = material.cohesion || 0;
+            const undrainedShearStrength = material.undrainedShearStrength || 0;
             const tanPhi = Math.tan(phi);
 
             for (let i = 0; i <= steps; i++) {
                 const sigma_n = (i / steps) * limit;
-                const tau = cohesion + sigma_n * tanPhi;
+                let tau = cohesion + sigma_n * tanPhi;
+                if (material.drainage_type === DrainageType.UNDRAINED_B || material.drainage_type === DrainageType.UNDRAINED_C) {
+                    tau = undrainedShearStrength;
+                }
+                else if ((material.cohesion === 0) && (material.drainage_type === DrainageType.DRAINED || material.drainage_type === DrainageType.UNDRAINED_A)) {
+                    tau = 0 + sigma_n * tanPhi;
+                }
                 points.push({
                     sigma_n: parseFloat(sigma_n.toFixed(2)),
                     tau: parseFloat(tau.toFixed(2))
@@ -58,10 +65,16 @@ export const YieldSurfaceChart: React.FC<YieldSurfaceChartProps> = ({ material }
                 }
             }
         }
-        return points;
+        return { points, limit };
     }, [material]);
 
-    const maxVal = 2 * Math.min(...chartData.map((d) => d.tau));
+    let maxVal = 2 * Math.min(...chartData.points.map((d) => d.tau));
+    if ((material.cohesion === 0) && (material.drainage_type === DrainageType.DRAINED || material.drainage_type === DrainageType.UNDRAINED_A)) {
+        maxVal = chartData.limit / 2;
+    }
+    else if (material.material_model === MaterialModel.HOEK_BROWN) {
+        maxVal = chartData.limit;
+    }
 
     if (material.material_model !== MaterialModel.MOHR_COULOMB && material.material_model !== MaterialModel.HOEK_BROWN) {
         return (
@@ -76,7 +89,7 @@ export const YieldSurfaceChart: React.FC<YieldSurfaceChartProps> = ({ material }
             <h4 className="text-xs font-semibold mb-2 text-slate-500 text-center tracking-wider">Failure Envelope (τ vs σ)</h4>
             <div className="w-full aspect-square">
                 <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 5, right: 0, left: -5, bottom: 30 }}>
+                    <LineChart data={chartData.points} margin={{ top: 5, right: 0, left: -5, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#8884d8" opacity={0.1} />
                         <XAxis
                             dataKey="sigma_n"

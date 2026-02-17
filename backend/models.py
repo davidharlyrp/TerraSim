@@ -83,6 +83,10 @@ class EmbeddedBeamMaterial(BaseModel):
     tipResistanceMax: float # F_max (kN) - limit compressive force at the tip
     # Connection logic (top/bottom) could be here or in the beam instance. 
     # Usually connection type is a property of the beam instance's node, but material property is E, A, I.
+    shape: Optional[str] = "user_defined"
+    thickness: Optional[float] = None
+    width: Optional[float] = None
+    diameter: Optional[float] = None
 
 class PointLoad(BaseModel):
     id: str

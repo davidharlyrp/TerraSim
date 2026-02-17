@@ -41,101 +41,101 @@ const getStressColor = (v: number) => {
     return getJetColor(1 - v);
 };
 
-const BoundaryOverlay = ({
-    mesh,
-    phaseResult,
-    phaseRequest,
-    deformationScale,
-    prevPhaseResult,
-    beamMaterials
-}: {
-    mesh: MeshResponse,
-    phaseResult: any,
-    phaseRequest: PhaseRequest,
-    deformationScale: number,
-    prevPhaseResult: any,
-    beamMaterials: any[]
-}) => {
-    const { fixedPositions, rollerPositions } = useMemo(() => {
-        const fixed: number[] = [];
-        const roller: number[] = [];
+// const BoundaryOverlay = ({
+//     mesh,
+//     phaseResult,
+//     phaseRequest,
+//     deformationScale,
+//     prevPhaseResult,
+//     beamMaterials
+// }: {
+//     mesh: MeshResponse,
+//     phaseResult: any,
+//     phaseRequest: PhaseRequest,
+//     deformationScale: number,
+//     prevPhaseResult: any,
+//     beamMaterials: any[]
+// }) => {
+//     const { fixedPositions, rollerPositions } = useMemo(() => {
+//         const fixed: number[] = [];
+//         const roller: number[] = [];
 
-        // Helper to get deformed pos
-        const getDeformedPos = (nIdx: number) => {
-            let x = mesh.nodes[nIdx][0];
-            let y = mesh.nodes[nIdx][1];
-            if (phaseResult) {
-                const d = phaseResult.displacements.find((d: any) => d.id === nIdx + 1);
-                if (d) {
-                    const resetVisual = phaseRequest?.reset_displacements || false;
-                    let dx = d.ux;
-                    let dy = d.uy;
-                    if (resetVisual && prevPhaseResult) {
-                        const dPrev = prevPhaseResult.displacements.find((d: any) => d.id === nIdx + 1);
-                        if (dPrev) {
-                            dx -= dPrev.ux;
-                            dy -= dPrev.uy;
-                        }
-                    }
-                    x += dx * deformationScale;
-                    y += dy * deformationScale;
-                }
-            }
-            return [x, y, 0.01]; // Slight Z offset
-        };
+//         // Helper to get deformed pos
+//         const getDeformedPos = (nIdx: number) => {
+//             let x = mesh.nodes[nIdx][0];
+//             let y = mesh.nodes[nIdx][1];
+//             if (phaseResult) {
+//                 const d = phaseResult.displacements.find((d: any) => d.id === nIdx + 1);
+//                 if (d) {
+//                     const resetVisual = phaseRequest?.reset_displacements || false;
+//                     let dx = d.ux;
+//                     let dy = d.uy;
+//                     if (resetVisual && prevPhaseResult) {
+//                         const dPrev = prevPhaseResult.displacements.find((d: any) => d.id === nIdx + 1);
+//                         if (dPrev) {
+//                             dx -= dPrev.ux;
+//                             dy -= dPrev.uy;
+//                         }
+//                     }
+//                     x += dx * deformationScale;
+//                     y += dy * deformationScale;
+//                 }
+//             }
+//             return [x, y, 0.01]; // Slight Z offset
+//         };
 
-        if (mesh.boundary_conditions) {
-            mesh.boundary_conditions.full_fixed.forEach(bc => {
-                const [x, y, z] = getDeformedPos(bc.node);
-                fixed.push(x, y, z);
-            });
-            mesh.boundary_conditions.normal_fixed.forEach(bc => {
-                const [x, y, z] = getDeformedPos(bc.node);
-                roller.push(x, y, z);
-            });
-        }
+//         if (mesh.boundary_conditions) {
+//             mesh.boundary_conditions.full_fixed.forEach(bc => {
+//                 const [x, y, z] = getDeformedPos(bc.node);
+//                 fixed.push(x, y, z);
+//             });
+//             mesh.boundary_conditions.normal_fixed.forEach(bc => {
+//                 const [x, y, z] = getDeformedPos(bc.node);
+//                 roller.push(x, y, z);
+//             });
+//         }
 
-        return {
-            fixedPositions: new Float32Array(fixed),
-            rollerPositions: new Float32Array(roller)
-        };
-    }, [mesh, phaseResult, deformationScale, phaseRequest, prevPhaseResult, beamMaterials]);
+//         return {
+//             fixedPositions: new Float32Array(fixed),
+//             rollerPositions: new Float32Array(roller)
+//         };
+//     }, [mesh, phaseResult, deformationScale, phaseRequest, prevPhaseResult, beamMaterials]);
 
-    return (
-        <group>
-            {/* Full Fixed - Red Squares */}
-            {fixedPositions.length > 0 && (
-                <points>
-                    <bufferGeometry>
-                        <bufferAttribute
-                            attach="attributes-position"
-                            count={fixedPositions.length / 3}
-                            array={fixedPositions}
-                            itemSize={3}
-                            args={[fixedPositions, 3]}
-                        />
-                    </bufferGeometry>
-                    <pointsMaterial color="red" size={6} sizeAttenuation={false} />
-                </points>
-            )}
-            {/* Roller - Orange Circles */}
-            {rollerPositions.length > 0 && (
-                <points>
-                    <bufferGeometry>
-                        <bufferAttribute
-                            attach="attributes-position"
-                            count={rollerPositions.length / 3}
-                            array={rollerPositions}
-                            itemSize={3}
-                            args={[rollerPositions, 3]}
-                        />
-                    </bufferGeometry>
-                    <pointsMaterial color="orange" size={5} sizeAttenuation={false} />
-                </points>
-            )}
-        </group>
-    );
-};
+//     return (
+//         <group>
+//             {/* Full Fixed - Red Squares */}
+//             {fixedPositions.length > 0 && (
+//                 <points>
+//                     <bufferGeometry>
+//                         <bufferAttribute
+//                             attach="attributes-position"
+//                             count={fixedPositions.length / 3}
+//                             array={fixedPositions}
+//                             itemSize={3}
+//                             args={[fixedPositions, 3]}
+//                         />
+//                     </bufferGeometry>
+//                     <pointsMaterial color="red" size={6} sizeAttenuation={false} />
+//                 </points>
+//             )}
+//             {/* Roller - Orange Circles */}
+//             {rollerPositions.length > 0 && (
+//                 <points>
+//                     <bufferGeometry>
+//                         <bufferAttribute
+//                             attach="attributes-position"
+//                             count={rollerPositions.length / 3}
+//                             array={rollerPositions}
+//                             itemSize={3}
+//                             args={[rollerPositions, 3]}
+//                         />
+//                     </bufferGeometry>
+//                     <pointsMaterial color="orange" size={5} sizeAttenuation={false} />
+//                 </points>
+//             )}
+//         </group>
+//     );
+// };
 
 const EmbeddedBeamOverlay = ({
     mesh,
@@ -395,17 +395,20 @@ const MeshResult = ({
                     if (outputType === OutputType.DEFORMED_CONTOUR) {
                         elem.forEach(nIdx => {
                             const d = dispMap.get(nIdx + 1);
-                            let val = 0;
                             if (d) {
+                                const isReset = phaseRequest?.reset_displacements || false;
+                                const parentPhaseResult = currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null;
+
                                 let dx = d.ux; let dy = d.uy;
-                                if (isReset) {
-                                    const pd = parentDispMap.get(d.id);
+                                if (isReset && parentPhaseResult) {
+                                    const pd = parentPhaseResult.displacements.find((pd: any) => pd.id === d.id);
                                     if (pd) { dx -= pd.ux; dy -= pd.uy; }
                                 }
-                                val = Math.sqrt(dx * dx + dy * dy);
+                                let val = Math.sqrt(dx * dx + dy * dy);
+
+                                localValues.set(nIdx, (localValues.get(nIdx) || 0) + val);
+                                localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
                             }
-                            localValues.set(nIdx, (localValues.get(nIdx) || 0) + val);
-                            localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
                         });
                         currentLabel = "Displacement (m)";
                     } else if (s) {
@@ -693,14 +696,14 @@ const MeshResult = ({
                 beamMaterials={beamMaterials}
             />
 
-            <BoundaryOverlay
+            {/* <BoundaryOverlay
                 mesh={mesh}
                 phaseResult={solverResult?.phases?.[currentPhaseIdx]}
                 phaseRequest={phases[currentPhaseIdx]}
                 deformationScale={deformationScale}
                 prevPhaseResult={currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null}
                 beamMaterials={beamMaterials}
-            />
+            /> */}
         </group>
     );
 };
@@ -842,9 +845,9 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                             {scale < 10 ? scale.toFixed(2) : scale.toFixed(0)}x
                                         </span>
                                         <button
-                                            onClick={() => setSliderValue(10)}
+                                            onClick={() => setSliderValue(1)}
                                             className="text-[10px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
-                                            title="Reset to 10x"
+                                            title="Actual Scale"
                                         >
                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -855,7 +858,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                 <input
                                     type="range"
                                     min="0"
-                                    max="100"
+                                    max="1000"
                                     step="1"
                                     value={sliderValue}
                                     onChange={(e) => setSliderValue(Number(e.target.value))}

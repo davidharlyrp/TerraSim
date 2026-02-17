@@ -9,7 +9,7 @@ export const Introduction: React.FC = () => {
             <header className="space-y-4">
                 <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
                     TerraSim <br />
-                    <span className="text-blue-500 text-3xl">Geotechnical Finite Element Analysis Software</span>
+                    <span className="font-bold text-blue-500 text-3xl">Geotechnical Finite Element Analysis Software</span>
                 </h1>
                 <p className="text-xl text-slate-400 leading-relaxed max-w-2xl">
                     TerraSim is a web-based application platform designed for geotechnical engineers to perform advanced 2D Finite Element Modeling with ease and precision.
@@ -79,11 +79,11 @@ export const Introduction: React.FC = () => {
                             className="cursor-pointer px-8 py-4 bg-white text-blue-600 font-bold rounded-xl hover:bg-blue-50 active:scale-95 transition-all shadow-xl">
                             User Manual
                         </button>
-                        {/* <button
+                        <button
                             onClick={() => navigate('/docs/scientific-reference')}
                             className="cursor-pointer px-8 py-4 bg-blue-500/20 text-white border border-white/20 font-bold rounded-xl hover:bg-white/10 active:scale-95 transition-all backdrop-blur-md">
                             Scientific Reference
-                        </button> */}
+                        </button>
                     </div>
                 </div>
             </div>

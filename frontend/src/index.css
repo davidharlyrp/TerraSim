@@ -17,18 +17,38 @@ body {
   width: 100vw;
 }
 
-/* Custom Scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+@utility custom-scrollbar {
+  direction: ltr;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    @apply bg-slate-400 dark:bg-slate-700 rounded-full hover:bg-slate-500 dark:hover:bg-slate-600 transition-colors;
+  }
+
+  &>* {
+    direction: ltr;
+  }
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  @apply bg-slate-200/50 dark:bg-slate-800/50;
-}
+@utility custom-scrollbarleft {
+  direction: rtl;
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-slate-400 dark:bg-slate-700 rounded-full hover:bg-slate-500 dark:hover:bg-slate-600 transition-colors;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    @apply bg-slate-400 dark:bg-slate-700 rounded-full hover:bg-slate-500 dark:hover:bg-slate-600 transition-colors;
+  }
+
+  &>* {
+    direction: ltr;
+  }
 }
 
 /* Selection */
