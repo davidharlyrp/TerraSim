@@ -17,7 +17,7 @@ export const MeshSidebar: React.FC<MeshSidebarProps> = ({
     onSettingsChange
 }) => {
     return (
-        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100vh-50px)] overflow-y-auto flex flex-col border-r md:border-0 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 md:custom-scrollbarleft custom-scrollbar">
+        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100dvh-50px)] overflow-y-auto flex flex-col border-r md:border-0 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 md:custom-scrollbarleft custom-scrollbar">
             <div className="label2">Mesh Options</div>
 
             {/* Global Mesh Settings */}

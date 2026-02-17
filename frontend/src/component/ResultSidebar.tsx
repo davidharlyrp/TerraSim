@@ -285,7 +285,7 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                 </div>
             </div>
 
-            <div className={`flex flex-col transition ${ResultSidebarOpen ? 'p-3 md:h-[calc(65vh)] h-full overflow-y-auto custom-scrollbar space-y-2 border-t border-slate-200 dark:border-slate-800 ' : 'h-0 overflow-y-hidden'}`}>
+            <div className={`flex flex-col transition ${ResultSidebarOpen ? 'p-3 md:h-[calc(65dvh)] h-full overflow-y-auto custom-scrollbar space-y-2 border-t border-slate-200 dark:border-slate-800 ' : 'h-0 overflow-y-hidden'}`}>
 
                 {isRunning && (
                     <div className="col-span-2 md:block hidden">

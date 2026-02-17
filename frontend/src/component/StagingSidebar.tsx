@@ -475,7 +475,7 @@ export const StagingSidebar: React.FC<StagingSidebarProps> = ({
     };
 
     return (
-        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100vh-50px)] pb-30 p-2 overflow-y-auto flex flex-col gap-2 border-r md:border-0 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 md:custom-scrollbarleft custom-scrollbar">
+        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100dvh-50px)] pb-30 p-2 overflow-y-auto flex flex-col gap-2 border-r md:border-0 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 md:custom-scrollbarleft custom-scrollbar">
             {/* PHASE */}
             <button
                 className="dropdownlabel2"

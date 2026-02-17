@@ -29,7 +29,7 @@ export const SampleGalleryModal: React.FC<SampleGalleryModalProps> = ({ onClose,
                 </div>
 
                 {/* Content */}
-                <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div className="p-6 max-h-[60dvh] overflow-y-auto custom-scrollbar">
                     <div className="grid grid-cols-1 gap-4">
                         {AVAILABLE_SAMPLES.map((sample) => (
                             <div

@@ -99,7 +99,7 @@ export const CloudLoadModal: React.FC<CloudLoadModalProps> = ({ onLoad, onClose 
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden transition-colors">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-[600px] max-h-[80dvh] flex flex-col overflow-hidden transition-colors">
                 <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 transition-colors">
                     <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
                         <h3>Your Cloud Projects</h3>

@@ -242,7 +242,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
 
 
     return (
-        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100vh-50px)] pb-30 p-2 flex flex-col gap-2 overflow-y-auto bg-slate-50 dark:bg-slate-900 border-r md:border-0 border-slate-200 dark:border-slate-700 md:custom-scrollbarleft custom-scrollbar">
+        <div className="md:w-[400px] w-[calc(100vw-40px)] md:h-full h-[calc(100dvh-50px)] pb-30 p-2 flex flex-col gap-2 overflow-y-auto bg-slate-50 dark:bg-slate-900 border-r md:border-0 border-slate-200 dark:border-slate-700 md:custom-scrollbarleft custom-scrollbar">
             {/* MATERIALS */}
             <button
                 className="dropdownlabel2"

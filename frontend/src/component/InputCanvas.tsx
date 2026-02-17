@@ -621,7 +621,7 @@ export const InputCanvas: React.FC<InputCanvasProps> = ({
 
             {/* Cursor Coordinate Overlay */}
             {cursorPos && (
-                <div className="absolute bottom-4 left-4 z-[50] pointer-events-none">
+                <div className="absolute bottom-4 left-4 z-9 pointer-events-none">
                     <div className="px-3 py-1.5 rounded-lg bg-slate-100/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200 dark:border-slate-700 shadow-lg flex items-center gap-3">
                         <div className="flex items-center gap-1.5">
                             <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">X</span>

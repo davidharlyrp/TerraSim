@@ -340,7 +340,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                         )}
                         <button
                             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                            className={`sticky relative z-72 top-4 right-4 block cursor-pointer transition ${isMobileMenuOpen ? 'rotate-180' : 'bg-blue-500/20'} w-8 h-8 flex items-center justify-center rounded-full  hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-all text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 group relative active:scale-95`}
+                            className={`sticky relative z-[72] top-4 right-4 block cursor-pointer transition ${isMobileMenuOpen ? 'rotate-180' : 'bg-blue-500/20'} w-8 h-8 flex items-center justify-center rounded-full  hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-all text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 group relative active:scale-95`}
                             title="User Panel"
                         >
                             <span className={`cursor-pointer p-2.5 transition ${isMobileMenuOpen ? 'opacity-0' : 'opacity-100'}`}>
@@ -359,7 +359,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             {isWindowSizeSmall && (
                 <>
                     {/* mobile menu */}
-                    <div className={`md:hidden block fixed z-70 top-0 left-0 right-0 bottom-0 h-full w-full overflow-y-auto custom-scrollbar bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 transition ${isMobileMenuOpen ? 'translate-y-0' : '-translate-y-[calc(100vh)]'}`}>
+                    <div className={`md:hidden block fixed z-[70] top-0 left-0 right-0 bottom-0 h-full w-full overflow-y-auto custom-scrollbar bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 transition ${isMobileMenuOpen ? 'translate-y-0' : '-translate-y-[calc(100dvh)]'}`}>
                         <div className="flex items-center gap-2 px-3 py-1.5 w-full border-b border-slate-200 dark:border-slate-700">
                             <div className="flex flex-col items-end py-3">
                                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 leading-none">Welcome, {user?.name}</span>

@@ -56,7 +56,7 @@ export const EmbeddedBeamMaterialModal: React.FC<EmbeddedBeamMaterialModalProps>
 
     return (
         <div className="fixed inset-0 w-screen h-screen bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-xl w-full max-w-[800px] max-h-[70vh] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 shadow-2xl text-slate-900 dark:text-white transition-colors">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-xl w-full max-w-[800px] max-h-[70dvh] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 shadow-2xl text-slate-900 dark:text-white transition-colors">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-2">Edit Beam Material: <span className="text-gray-600 dark:text-gray-400">{edited.name}</span></h3>
 
                 <div className="grid md:grid-cols-2 grid-cols-1 gap-6">

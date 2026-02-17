@@ -786,7 +786,7 @@ function MainApp() {
     const isInputTab = activeTab === WizardTab.INPUT || activeTab === WizardTab.MESH || activeTab === WizardTab.STAGING;
 
     return (
-        <div className="flex flex-col h-screen overflow-hidden bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 selection:bg-blue-500/30">
+        <div className="flex flex-col h-100dvh overflow-hidden bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 selection:bg-blue-500/30">
             {!isValid && <AuthModal />}
             {isSampleGalleryOpen && (
                 <SampleGalleryModal
@@ -982,7 +982,7 @@ function MainApp() {
                         onTabChange={setActiveTab}
                     />
 
-                    <div className="flex-1 h-[calc(100vh-100px)] relative bg-slate-50 dark:bg-slate-950 mx-2 mb-2 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <div className="flex-1 h-[calc(100dvh-100px)] relative bg-slate-50 dark:bg-slate-950 mx-2 mb-2 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
                         {activeTab === WizardTab.INPUT && (
                             <InputCanvas
                                 polygons={polygons}
