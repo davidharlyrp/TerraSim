@@ -115,7 +115,7 @@ export const InputToolbar: React.FC<InputToolbarProps> = ({ drawMode, onDrawMode
             <button
                 onClick={() => onDrawModeChange(drawMode === 'embedded_beam' ? null : 'embedded_beam')}
                 title="Draw Embedded Beam"
-                className={`cursor-pointer w-10 h-10 p-2 rounded-lg transition-colors relative group flex items-center justify-center ${drawMode === 'embedded_beam' ? 'bg-amber-100 dark:bg-amber-600/20 text-amber-600 dark:text-amber-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                className={`cursor-pointer w-10 h-10 p-2 rounded-lg transition-colors relative group flex items-center justify-center ${drawMode === 'embedded_beam' ? 'bg-blue-100 dark:bg-blue-600/20 text-blue-600 dark:text-blue-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
             >
                 <div className="relative">

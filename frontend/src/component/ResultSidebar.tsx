@@ -204,7 +204,7 @@ const ResultSummary = ({ phaseResult, prevPhaseResult, isReset, phaseType }: { p
             <CompactRow label="σ'3 Eff." values={summary.s3e} />
             <CompactRow label="Total PWP" values={summary.pwp} />
 
-            <div className="mt-2 pt-2 flex items-center justify-between border-t border-slate-800">
+            <div className="mt-2 pt-2 flex items-center justify-between">
                 <span className="text-[10px] text-slate-500 tracking-tighter">Yield Status</span>
                 <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${summary.yieldCount > 0 ? 'bg-rose-500/20 text-rose-500' : 'bg-emerald-500/20 text-emerald-500'}`}>
                     {summary.yieldCount} <span className="font-normal opacity-70">points</span>
@@ -249,13 +249,13 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                     <button
                         onClick={onRun}
                         disabled={isRunning}
-                        className={`cursor-pointer w-full py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all md:shadow-lg ${isRunning
+                        className={`cursor-pointer w-full py-2 rounded-xl font-bold text-xs uppercase tracking-widest transition-all md:shadow-lg ${isRunning
                             ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20 hover:scale-[1.02]'
+                            : 'bg-blue-700 hover:bg-blue-600 text-white shadow-blue-500/10 hover:scale-[1.02]'
                             }`}
                     >
                         {isRunning ? (
-                            <span className="flex items-center justify-center gap-2">
+                            <span className="flex items-center justify-center gap-2 text-[10px]">
                                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>

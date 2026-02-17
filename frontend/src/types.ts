@@ -262,6 +262,10 @@ export interface StressResult {
     pwp_steady?: number;
     pwp_excess?: number;
     pwp_total?: number;
+    eps_xx?: number;
+    eps_yy?: number;
+    eps_xy?: number;
+    eps_zz?: number;
 }
 
 export interface StepPoint {
@@ -291,6 +295,8 @@ export interface SolverResponse {
 export enum OutputType {
     DEFORMED_MESH = "deformed_mesh",
     DEFORMED_CONTOUR = "deformed_contour",
+    DEFORMED_CONTOUR_UX = "deformed_contour_ux",
+    DEFORMED_CONTOUR_UY = "deformed_contour_uy",
     SIGMA_1 = "sigma_1",
     SIGMA_3 = "sigma_3",
     SIGMA_1_EFF = "sigma_1_eff",
@@ -298,7 +304,9 @@ export enum OutputType {
     YIELD_STATUS = "yield_status",
     PWP_STEADY = "pwp_steady",
     PWP_EXCESS = "pwp_excess",
-    PWP_TOTAL = "pwp_total"
+    PWP_TOTAL = "pwp_total",
+    STRAIN_1 = "strain_1",
+    STRAIN_3 = "strain_3"
 }
 
 export interface GeneralSettings {

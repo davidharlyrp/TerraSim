@@ -224,6 +224,10 @@ class StressResult(BaseModel):
     pwp_steady: Optional[float] = 0.0
     pwp_excess: Optional[float] = 0.0
     pwp_total: Optional[float] = 0.0
+    eps_xx: Optional[float] = 0.0
+    eps_yy: Optional[float] = 0.0
+    eps_xy: Optional[float] = 0.0
+    eps_zz: Optional[float] = 0.0
 
 class PhaseResult(BaseModel):
     phase_id: str

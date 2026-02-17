@@ -6,6 +6,15 @@ export interface SoftwareUpdate {
 
 export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
     {
+        version: "v 0.4.1",
+        date: "2026-02-18",
+        changes: [
+            "add strain output",
+            "add Ux and Uy output",
+            "bug fixes"
+        ]
+    },
+    {
         version: "v 0.4.0",
         date: "2026-02-17",
         changes: [

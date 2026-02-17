@@ -1493,11 +1493,13 @@ def solve_phases(request: SolverRequest, should_stop=None):
             # Get list of Gauss point states
             sig_list = phase_stress_history.get(eid, element_stress_state.get(eid, [np.zeros(3)]*3))
             yld_list = phase_yield_history.get(eid, element_yield_state.get(eid, [False]*3))
+            strain_list = phase_strain_history.get(eid, element_strain_state.get(eid, [np.zeros(3)]*3))
             pwp_excess_list = phase_pwp_excess_history.get(eid, element_pwp_excess_state.get(eid, [0.0]*3))
             
             for gp_idx in range(3):
                 gp_data = ep['gauss_points'][gp_idx]
                 sig = sig_list[gp_idx]
+                eps = strain_list[gp_idx]
                 yld = yld_list[gp_idx]
                 pwp_excess = pwp_excess_list[gp_idx]
                 
@@ -1522,6 +1524,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     pwp_steady=pwp_static,
                     pwp_excess=pwp_excess,
                     pwp_total=pwp_total,
+                    eps_xx=eps[0], eps_yy=eps[1], eps_xy=eps[2], eps_zz=0.0, # Strain zz can be added if needed
                     is_yielded=yld, m_stage=current_m_stage
                 ))
         

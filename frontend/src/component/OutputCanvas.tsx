@@ -346,6 +346,16 @@ const MeshResult = ({
                 if (outputType === OutputType.PWP_STEADY) return p_steady;
                 if (outputType === OutputType.PWP_EXCESS) return p_excess;
                 if (outputType === OutputType.PWP_TOTAL) return p_total;
+
+                if (outputType === OutputType.STRAIN_1 || outputType === OutputType.STRAIN_3) {
+                    const exx = s.eps_xx || 0;
+                    const eyy = s.eps_yy || 0;
+                    const exy = s.eps_xy || 0;
+                    const center = (exx + eyy) / 2;
+                    const radius = Math.sqrt(Math.pow((exx - eyy) / 2, 2) + Math.pow(exy, 2));
+                    return outputType === OutputType.STRAIN_1 ? center + radius : center - radius;
+                }
+
                 const avg = (s.sig_xx + s.sig_yy) / 2;
                 const diff = (s.sig_xx - s.sig_yy) / 2;
                 const radius = Math.sqrt(diff * diff + s.sig_xy * s.sig_xy);
@@ -374,6 +384,8 @@ const MeshResult = ({
             else if (outputType === OutputType.SIGMA_3) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\sigma_3" /> <MathRender tex="(kN/m^2)" /></span>;
             else if (outputType === OutputType.SIGMA_1_EFF) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\sigma'_1" /> <MathRender tex="(kN/m^2)" /></span>;
             else if (outputType === OutputType.SIGMA_3_EFF) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\sigma'_3" /> <MathRender tex="(kN/m^2)" /></span>;
+            else if (outputType === OutputType.STRAIN_1) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\epsilon_1" /></span>;
+            else if (outputType === OutputType.STRAIN_3) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\epsilon_3" /></span>;
 
             const stressMap = new Map<number, any>();
             phaseResult?.stresses.forEach(s => stressMap.set(s.element_id, s));
@@ -411,6 +423,44 @@ const MeshResult = ({
                             }
                         });
                         currentLabel = "Displacement (m)";
+                    } else if (outputType === OutputType.DEFORMED_CONTOUR_UX) {
+                        elem.forEach(nIdx => {
+                            const d = dispMap.get(nIdx + 1);
+                            if (d) {
+                                const isReset = phaseRequest?.reset_displacements || false;
+                                const parentPhaseResult = currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null;
+
+                                let dx = d.ux;
+                                if (isReset && parentPhaseResult) {
+                                    const pd = parentPhaseResult.displacements.find((pd: any) => pd.id === d.id);
+                                    if (pd) { dx -= pd.ux; }
+                                }
+                                let val = Math.sqrt(dx * dx);
+
+                                localValues.set(nIdx, (localValues.get(nIdx) || 0) + val);
+                                localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
+                            }
+                        });
+                        currentLabel = "Displacement ux (m)";
+                    } else if (outputType === OutputType.DEFORMED_CONTOUR_UY) {
+                        elem.forEach(nIdx => {
+                            const d = dispMap.get(nIdx + 1);
+                            if (d) {
+                                const isReset = phaseRequest?.reset_displacements || false;
+                                const parentPhaseResult = currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null;
+
+                                let dy = d.uy;
+                                if (isReset && parentPhaseResult) {
+                                    const pd = parentPhaseResult.displacements.find((pd: any) => pd.id === d.id);
+                                    if (pd) { dy -= pd.uy; }
+                                }
+                                let val = Math.sqrt(dy * dy);
+
+                                localValues.set(nIdx, (localValues.get(nIdx) || 0) + val);
+                                localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
+                            }
+                        });
+                        currentLabel = "Displacement uy (m)";
                     } else if (s) {
                         const val = outputType === OutputType.YIELD_STATUS ? (s.is_yielded ? 1 : 0) : getStressValue(s);
                         if (outputType === OutputType.YIELD_STATUS) currentLabel = "Yield Status";
@@ -497,7 +547,7 @@ const MeshResult = ({
                         }
 
                         // For stress views, use actual GP value
-                        if (outputType !== OutputType.DEFORMED_CONTOUR && outputType !== OutputType.YIELD_STATUS && stressInfo && phaseResult) {
+                        if (outputType !== OutputType.DEFORMED_CONTOUR && outputType !== OutputType.DEFORMED_CONTOUR_UX && outputType !== OutputType.DEFORMED_CONTOUR_UY && outputType !== OutputType.YIELD_STATUS && stressInfo && phaseResult) {
                             const gpStress = phaseResult.stresses.find(s => s.element_id === eIdx + 1 && s.gp_id === gpIdx + 1);
                             if (gpStress) {
                                 val = getStressValue(gpStress);
@@ -569,8 +619,18 @@ const MeshResult = ({
             // Apply Noise Threshold Filters
             const NOISE_DISP = 1e-7; // 0.1 micrometer
             const NOISE_STRESS = 1e-3; // 1 Pa
+            const NOISE_STRAIN = 1e-6; // 1 microstrain
 
-            let currentThreshold = outputType === OutputType.DEFORMED_CONTOUR ? NOISE_DISP : NOISE_STRESS;
+            // Use the currentLabel from the outer scope or determine it here if needed for range display
+            let currentThreshold;
+            if (outputType === OutputType.DEFORMED_CONTOUR || outputType === OutputType.DEFORMED_CONTOUR_UX || outputType === OutputType.DEFORMED_CONTOUR_UY) {
+                currentThreshold = NOISE_DISP;
+            } else if (outputType === OutputType.STRAIN_1 || outputType === OutputType.STRAIN_3) {
+                currentThreshold = NOISE_STRAIN;
+            } else {
+                currentThreshold = NOISE_STRESS;
+            }
+
             if (outputType === OutputType.YIELD_STATUS) currentThreshold = 0;
 
             if (max - min < currentThreshold) {
@@ -614,7 +674,7 @@ const MeshResult = ({
                         } else {
                             // Use AVERAGED min/max for smooth coloring (as requested)
                             const norm = (tri.avgVal - min) / (max - min);
-                            rgb = outputType === OutputType.DEFORMED_CONTOUR ? getJetColor(norm) : getStressColor(norm);
+                            rgb = outputType === OutputType.DEFORMED_CONTOUR || outputType === OutputType.DEFORMED_CONTOUR_UX || outputType === OutputType.DEFORMED_CONTOUR_UY ? getJetColor(norm) : getStressColor(norm);
                         }
 
                         // Add all 3 vertices with same color (flat shading)
@@ -656,8 +716,6 @@ const MeshResult = ({
     React.useEffect(() => {
         onValueRangeChange(rangeData.min, rangeData.max, rangeData.label);
     }, [rangeData, onValueRangeChange]);
-
-    if (!mesh) return null;
 
     if (!mesh) return null;
 
@@ -742,7 +800,7 @@ const Legend = ({ min, max, label, visible, outputType }: { min: number, max: nu
         return val.toFixed(3);
     };
 
-    const isStressOrPwp = outputType !== OutputType.DEFORMED_CONTOUR;
+    const isStressOrPwp = outputType !== OutputType.DEFORMED_CONTOUR && outputType !== OutputType.DEFORMED_CONTOUR_UX && outputType !== OutputType.DEFORMED_CONTOUR_UY;
     const gradient = isStressOrPwp
         ? 'linear-gradient(to right, #800000, #FF0000, #FFFF00, #00FFFF, #0000FF, #000080)'
         : 'linear-gradient(to right, #000080, #0000FF, #00FFFF, #FFFF00, #FF0000, #800000)';
@@ -772,6 +830,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 }) => {
     const [sliderValue, setSliderValue] = useState(100);
     const [outputType, setOutputType] = useState<OutputType>(OutputType.DEFORMED_CONTOUR);
+    const [outputCategory, setOutputCategory] = useState<string>('deformed');
     const [range, setRange] = useState<{ min: number, max: number, label: React.ReactNode }>({ min: 0, max: 0, label: "" });
     const [showNodes, setShowNodes] = useState(false);
     const [showGaussPoints, setShowGaussPoints] = useState(false);
@@ -801,6 +860,33 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 
     const { theme } = useTheme();
     const backgroundColor = theme === 'dark' ? "bg-slate-950" : "bg-slate-50";
+    const categories = {
+        deformed: {
+            label: "Deformed View",
+            types: [OutputType.DEFORMED_MESH, OutputType.DEFORMED_CONTOUR, OutputType.DEFORMED_CONTOUR_UX, OutputType.DEFORMED_CONTOUR_UY]
+        },
+        sigmaTotal: {
+            label: "Principal Total Stress",
+            types: [OutputType.SIGMA_1, OutputType.SIGMA_3]
+        },
+        sigmaEff: {
+            label: "Principal Eff. Stress",
+            types: [OutputType.SIGMA_1_EFF, OutputType.SIGMA_3_EFF]
+        },
+        pwp: {
+            label: "Pore Water Pressure",
+            types: [OutputType.PWP_STEADY, OutputType.PWP_EXCESS, OutputType.PWP_TOTAL]
+        },
+        strains: {
+            label: "Principal Strains",
+            types: [OutputType.STRAIN_1, OutputType.STRAIN_3]
+        },
+        yieldStatus: {
+            label: "Yield Points",
+            types: [OutputType.YIELD_STATUS]
+        }
+    };
+
     const isMobile = window.innerWidth < 768;
 
     const [hoveredItem, setHoveredItem] = useState<{
@@ -819,27 +905,187 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                         <div>
                             <label className="block text-[10px] font-semibold text-slate-700 dark:text-slate-500 mb-2 tracking-widest">Output View</label>
                             <select
-                                value={outputType}
-                                onChange={(e) => setOutputType(e.target.value as OutputType)}
+                                value={outputCategory}
+                                onChange={(e) => {
+                                    const cat = e.target.value;
+                                    setOutputCategory(cat);
+                                    // Set default type for category
+                                    setOutputType(categories[cat as keyof typeof categories].types[0]);
+                                }}
                                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-xs p-2 rounded outline-none focus:border-blue-500 transition-colors cursor-pointer"
                             >
-                                <option value={OutputType.DEFORMED_MESH}>Deformed Mesh</option>
-                                <option value={OutputType.DEFORMED_CONTOUR}>Deformed Contour</option>
-                                <option value={OutputType.SIGMA_1}>Sigma 1 Major Total</option>
-                                <option value={OutputType.SIGMA_3}>Sigma 3 Minor Total</option>
-                                <option value={OutputType.SIGMA_1_EFF}>Sigma 1 Major Eff</option>
-                                <option value={OutputType.SIGMA_3_EFF}>Sigma 3 Minor Eff</option>
-                                <option value={OutputType.PWP_STEADY}>PWP Steady (Static)</option>
-                                <option value={OutputType.PWP_EXCESS}>PWP Excess (Loading)</option>
-                                <option value={OutputType.PWP_TOTAL}>PWP Total</option>
-                                <option value={OutputType.YIELD_STATUS}>Yield Points</option>
+                                <option value="deformed">Deformation</option>
+                                <option value="sigmaTotal">Principal Total Stress</option>
+                                <option value="sigmaEff">Principal Eff. Stress</option>
+                                <option value="strains">Principal Strains</option>
+                                <option value="pwp">Pore Water Pressure</option>
+                                <option value="yieldStatus">Yield Points</option>
                             </select>
                         </div>
+
+                        {outputCategory === 'deformed' && (
+                            <div className="space-y-3">
+                                <div className="flex flex-col gap-2">
+                                    <label className="flex items-center gap-2 cursor-pointer group">
+                                        <input
+                                            type="radio"
+                                            name="deformedMode"
+                                            checked={outputType === OutputType.DEFORMED_MESH}
+                                            onChange={() => setOutputType(OutputType.DEFORMED_MESH)}
+                                            className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                        />
+                                        <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest">Deformed Mesh</span>
+                                    </label>
+                                    <div className="flex items-center justify-between gap-2 border-t border-slate-200 dark:border-slate-800 pt-2">
+                                        <label className="flex items-center gap-1.5 cursor-pointer group">
+                                            <input
+                                                type="radio"
+                                                name="deformedMode"
+                                                checked={outputType === OutputType.DEFORMED_CONTOUR}
+                                                onChange={() => setOutputType(OutputType.DEFORMED_CONTOUR)}
+                                                className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                            />
+                                            <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest">|u|</span>
+                                        </label>
+                                        <label className="flex items-center gap-1.5 cursor-pointer group">
+                                            <input
+                                                type="radio"
+                                                name="deformedMode"
+                                                checked={outputType === OutputType.DEFORMED_CONTOUR_UX}
+                                                onChange={() => setOutputType(OutputType.DEFORMED_CONTOUR_UX)}
+                                                className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                            />
+                                            <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest">ux</span>
+                                        </label>
+                                        <label className="flex items-center gap-1.5 cursor-pointer group">
+                                            <input
+                                                type="radio"
+                                                name="deformedMode"
+                                                checked={outputType === OutputType.DEFORMED_CONTOUR_UY}
+                                                onChange={() => setOutputType(OutputType.DEFORMED_CONTOUR_UY)}
+                                                className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                            />
+                                            <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest">uy</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {outputCategory === 'sigmaTotal' && (
+                            <div className='flex items-center justify-between gap-4 mx-2'>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="sigmaTotalMode"
+                                        checked={outputType === OutputType.SIGMA_1}
+                                        onChange={() => setOutputType(OutputType.SIGMA_1)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='\sigma_1'></MathRender></label>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="sigmaTotalMode"
+                                        checked={outputType === OutputType.SIGMA_3}
+                                        onChange={() => setOutputType(OutputType.SIGMA_3)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='\sigma_3'></MathRender></label>
+                                </label>
+                            </div>
+                        )}
+
+                        {outputCategory === 'sigmaEff' && (
+                            <div className='flex items-center justify-between gap-4 mx-2'>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="sigmaEffMode"
+                                        checked={outputType === OutputType.SIGMA_1_EFF}
+                                        onChange={() => setOutputType(OutputType.SIGMA_1_EFF)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='\sigma_1^\prime'></MathRender></label>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="sigmaEffMode"
+                                        checked={outputType === OutputType.SIGMA_3_EFF}
+                                        onChange={() => setOutputType(OutputType.SIGMA_3_EFF)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='\sigma_3^\prime'></MathRender></label>
+                                </label>
+                            </div>
+                        )}
+
+                        {outputCategory === 'pwp' && (
+                            <div className='grid grid-cols-2 gap-2'>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="pwpMode"
+                                        checked={outputType === OutputType.PWP_STEADY}
+                                        onChange={() => setOutputType(OutputType.PWP_STEADY)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='U_{hydrostatic}'></MathRender></span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="pwpMode"
+                                        checked={outputType === OutputType.PWP_EXCESS}
+                                        onChange={() => setOutputType(OutputType.PWP_EXCESS)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='U_{excess}'></MathRender></span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="pwpMode"
+                                        checked={outputType === OutputType.PWP_TOTAL}
+                                        onChange={() => setOutputType(OutputType.PWP_TOTAL)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='U_{total}'></MathRender></span>
+                                </label>
+                            </div>
+                        )}
+
+                        {outputCategory === 'strains' && (
+                            <div className='flex items-center justify-between gap-4 mx-2'>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="strainMode"
+                                        checked={outputType === OutputType.STRAIN_1}
+                                        onChange={() => setOutputType(OutputType.STRAIN_1)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='\epsilon_1'></MathRender></label>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="radio"
+                                        name="strainMode"
+                                        checked={outputType === OutputType.STRAIN_3}
+                                        onChange={() => setOutputType(OutputType.STRAIN_3)}
+                                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                                    />
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest"><MathRender tex='\epsilon_3'></MathRender></label>
+                                </label>
+                            </div>
+                        )}
 
                         {outputType === OutputType.DEFORMED_MESH && (
                             <div>
                                 <div className="flex justify-between items-center mb-2">
-                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest uppercase">Deformation Scale</label>
+                                    <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 tracking-widest">Deformation Scale</label>
                                     <div className="flex items-center gap-2">
                                         <span className="text-[10px] font-mono bg-blue-100 dark:bg-blue-500/10 px-1.5 py-0.5 rounded text-blue-800 dark:text-blue-100">
                                             {scale < 10 ? scale.toFixed(2) : scale.toFixed(0)}x
@@ -1015,7 +1261,15 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                             key={`node-${i}`}
                                             position={[node[0], node[1], 0.1]}
                                             onPointerOver={(e) => {
-                                                if (outputType !== OutputType.DEFORMED_CONTOUR) return;
+                                                if (outputType === OutputType.DEFORMED_CONTOUR || outputType === OutputType.DEFORMED_CONTOUR_UX || outputType === OutputType.DEFORMED_CONTOUR_UY) {
+                                                    // No specific node value for these, just general info
+                                                } else if (outputType === OutputType.STRAIN_1 || outputType === OutputType.STRAIN_3) {
+                                                    // Strain values are at GPs, not directly at nodes in this context
+                                                    // Could interpolate, but for now, no specific node strain value tooltip
+                                                } else {
+                                                    // Stress values are at GPs, not directly at nodes in this context
+                                                    // Could interpolate, but for now, no specific node stress value tooltip
+                                                }
                                                 e.stopPropagation();
                                                 setHoveredItem({
                                                     type: 'node',
@@ -1042,7 +1296,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                     const nodes = elem.map(idx => mesh.nodes[idx]);
 
                                     // Find stress results for this element
-                                    // Optimization: This search is O(N_results), could be slow for huge info. 
+                                    // Optimization: This search is O(N_results), could be slow for huge info.
                                     // Better to assume sorted or use map. For now simple find.
                                     const phaseRes = solverResult?.phases[currentPhaseIdx];
                                     if (!phaseRes) return null;
@@ -1099,54 +1353,73 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 
                                                     // Backend returns flat list of StressResult per GP
                                                     // We need to find the specific GP result
-                                                    const gpRes = phaseRes.stresses.find(s => s.element_id === elemIdx + 1 && s.gp_id === gpIdx + 1);
+                                                    const sr_gp = phaseRes.stresses.find(s => s.element_id === elemIdx + 1 && s.gp_id === gpIdx + 1);
 
-                                                    if (gpRes) {
-                                                        const { sig_xx, sig_yy, sig_xy, sig_zz, is_yielded, pwp_excess, pwp_steady, pwp_total } = gpRes;
+                                                    if (sr_gp) {
+                                                        const { sig_xx, sig_yy, sig_xy, sig_zz, is_yielded, pwp_excess, pwp_steady, pwp_total } = sr_gp;
 
                                                         let title = `GP ${elemIdx + 1}.${gpIdx + 1}`;
                                                         let body = <></>;
+                                                        let val = 0;
 
                                                         const s_avg = (sig_xx + sig_yy) / 2;
                                                         const R = Math.sqrt(Math.pow((sig_xx - sig_yy) / 2, 2) + Math.pow(sig_xy, 2));
-                                                        const sigma1 = s_avg - R;
-                                                        const sigma3 = s_avg + R;
+                                                        const sigma1 = s_avg + R;
+                                                        const sigma3 = s_avg - R;
+
+                                                        if (outputType === OutputType.STRAIN_1 || outputType === OutputType.STRAIN_3) {
+                                                            const exx = sr_gp.eps_xx || 0;
+                                                            const eyy = sr_gp.eps_yy || 0;
+                                                            const exy = sr_gp.eps_xy || 0;
+                                                            const center = (exx + eyy) / 2;
+                                                            const radius = Math.sqrt(Math.pow((exx - eyy) / 2, 2) + Math.pow(exy, 2));
+                                                            val = outputType === OutputType.STRAIN_1 ? center + radius : center - radius;
+                                                        } else {
+                                                            val = (outputType === OutputType.SIGMA_1 || outputType === OutputType.SIGMA_1_EFF) ? sigma1 : sigma3;
+                                                        }
 
                                                         switch (outputType) {
                                                             case OutputType.SIGMA_1:
                                                                 title += " - Sigma 1 Total";
-                                                                body = <div>{sigma1.toFixed(2)} kPa</div>;
+                                                                body = <div>{val.toFixed(3)} kPa</div>;
                                                                 break;
                                                             case OutputType.SIGMA_3:
                                                                 title += " - Sigma 3 Total";
-                                                                body = <div>{sigma3.toFixed(2)} kPa</div>;
+                                                                body = <div>{val.toFixed(3)} kPa</div>;
                                                                 break;
                                                             case OutputType.SIGMA_1_EFF:
                                                                 title += " - Sigma 1 Effective";
-                                                                body = <div>{(sigma1 - (pwp_total || 0)).toFixed(2)} kPa</div>;
+                                                                body = <div>{(sigma1 - (pwp_total || 0)).toFixed(3)} kPa</div>;
                                                                 break;
                                                             case OutputType.SIGMA_3_EFF:
                                                                 title += " - Sigma 3 Effective";
-                                                                body = <div>{(sigma3 - (pwp_total || 0)).toFixed(2)} kPa</div>;
+                                                                body = <div>{(sigma3 - (pwp_total || 0)).toFixed(3)} kPa</div>;
+                                                                break;
+                                                            case OutputType.STRAIN_1:
+                                                                title += " - Principal Strain 1";
+                                                                body = <div>{(val * 100).toFixed(4)} %</div>;
+                                                                break;
+                                                            case OutputType.STRAIN_3:
+                                                                title += " - Principal Strain 3";
+                                                                body = <div>{(val * 100).toFixed(4)} %</div>;
                                                                 break;
                                                             case OutputType.PWP_EXCESS:
                                                                 title += " - PWP Excess";
-                                                                body = <div>{(pwp_excess || 0).toFixed(2)} kPa</div>;
+                                                                body = <div>{(pwp_excess || 0).toFixed(3)} kPa</div>;
                                                                 break;
                                                             case OutputType.PWP_STEADY:
                                                                 title += " - PWP Steady";
-                                                                body = <div>{(pwp_steady || 0).toFixed(2)} kPa</div>;
+                                                                body = <div>{(pwp_steady || 0).toFixed(3)} kPa</div>;
                                                                 break;
                                                             case OutputType.PWP_TOTAL:
                                                                 title += " - PWP Total";
-                                                                body = <div>{(pwp_total || 0).toFixed(2)} kPa</div>;
+                                                                body = <div>{(pwp_total || 0).toFixed(3)} kPa</div>;
                                                                 break;
                                                             case OutputType.YIELD_STATUS:
                                                                 title += " - Yield Status";
                                                                 body = <div className={is_yielded ? "text-red-400 font-bold" : "text-green-400"}>{is_yielded ? "YIELDED" : "Elastic"}</div>;
                                                                 break;
                                                             default:
-                                                                // Default to full tensor if no specific scalar view or generic view
                                                                 body = (
                                                                     <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
                                                                         <span>σx:</span> <span className="text-right font-mono">{sig_xx.toExponential(2)}</span>
@@ -1162,7 +1435,6 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                                             <div className="text-[10px] bg-slate-800 text-white p-2 rounded shadow-lg border border-slate-600 min-w-[120px]">
                                                                 <div className="font-bold border-b border-slate-600 mb-1 flex justify-between items-center">
                                                                     <span>{title}</span>
-
                                                                 </div>
                                                                 {body}
                                                             </div>
@@ -1198,6 +1470,6 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                     </>
                 )}
             </Canvas>
-        </div>
+        </div >
     );
 };
