@@ -26,6 +26,7 @@ from .k0_procedure import compute_vertical_stress_k0_t6
 from .mohr_coulomb import mohr_coulomb_yield, return_mapping_mohr_coulomb
 from .hoek_brown import hoek_brown_yield, return_mapping_hoek_brown
 from .element_embedded_beam import compute_beam_element_matrix, compute_beam_internal_force_yield
+from .arc_length import run_arc_length_step, compute_initial_arc_length
 
 
 @njit
@@ -1198,6 +1199,21 @@ def solve_phases(request: SolverRequest, should_stop=None):
             continue
 
         m_type = "MStage" if not is_srm else "Msf"
+
+        # === ARC LENGTH INITIALIZATION ===
+        use_arc_length = getattr(settings, 'use_arc_length', False)
+        arc_length_radius = 0.0
+        sign_lambda = 1.0
+        F_ref_srm = None  # Perturbation-based reference load for SRM
+        prev_delta_u_free = None  # Track previous displacement for limit point detection
+        if use_arc_length:
+            msg_al = f"Arc Length Method ENABLED for phase '{phase.name}'"
+            if is_srm:
+                msg_al += " (SRM: using perturbation-based reference load)"
+            log.append(msg_al)
+            yield {"type": "log", "content": msg_al}
+            print(msg_al)
+
         while (not is_srm and current_m_stage < 1.0) or (is_srm and current_m_stage < 100.0): 
             if should_stop and should_stop():
                 log.append("Analysis cancelled by user during MStage loop.")
@@ -1229,190 +1245,329 @@ def solve_phases(request: SolverRequest, should_stop=None):
             step_start_strain_arr = np.array([step_start_strain[ep['id']] for ep in active_elem_props])
             step_start_pwp_arr = np.array([step_start_pwp[ep['id']] for ep in active_elem_props])
 
-            # Newton-Raphson
-            iteration = 0
-            converged = False
-            step_du = np.zeros(num_dof) 
-            
-            while iteration < settings.max_iterations:
-                iteration += 1
+            if use_arc_length:
+                # ==========================================
+                # ARC LENGTH METHOD BRANCH
+                # ==========================================
                 
-                total_u_candidate = total_displacement + current_u_incremental + step_du
+                # Helper: Assemble stiffness matrix (returns K_free sparse)
+                def _assemble_stiffness():
+                    _active_elem_D_tangent_arr = np.array([element_tangent_matrices[ep['id']] for ep in active_elem_props])
+                    _K_values = assemble_stiffness_values_numba(
+                        _active_elem_D_tangent_arr,
+                        B_matrices_arr,
+                        det_J_arr,
+                        weights_arr
+                    )
+                    if active_beam_props:
+                        _beam_k_vals = []
+                        for bp in active_beam_props:
+                            _beam_k_vals.extend(bp['K'].flatten())
+                        _K_values = np.concatenate((_K_values, np.array(_beam_k_vals)))
+                    _K_global = sp.coo_matrix((_K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
+                    return _K_global[free_dofs, :][:, free_dofs]
                 
-                # Call Numba Kernel for Internal Forces and Stress Update
-                F_int, new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = compute_elements_stresses_numba(
-                    elem_nodes_arr,
-                    total_u_candidate,
-                    step_start_stress_arr,
-                    step_start_strain_arr,
-                    step_start_pwp_arr,
-                    B_matrices_arr,
-                    det_J_arr,
-                    weights_arr,
-                    D_elastic_arr,
-                    pwp_static_arr,
-                    mat_drainage_arr,
-                    mat_model_arr,
-                    mat_c_arr,
-                    mat_phi_arr,
-                    mat_su_arr,
-                    mat_sigma_ci_arr,
-                    mat_gsi_arr,
-                    mat_disturb_factor_arr,
-                    mat_mb_arr,
-                    mat_s_arr,
-                    mat_a_arr,
-                    penalties_arr,
-                    is_srm,
-                    is_gravity_phase,
-                    target_m_stage,
-                    num_dof
+                # Helper: Compute stresses via Numba kernel
+                def _compute_stresses(total_u_cand, tgt_m):
+                    return compute_elements_stresses_numba(
+                        elem_nodes_arr, total_u_cand,
+                        step_start_stress_arr, step_start_strain_arr, step_start_pwp_arr,
+                        B_matrices_arr, det_J_arr, weights_arr, D_elastic_arr, pwp_static_arr,
+                        mat_drainage_arr, mat_model_arr, mat_c_arr, mat_phi_arr, mat_su_arr,
+                        mat_sigma_ci_arr, mat_gsi_arr, mat_disturb_factor_arr,
+                        mat_mb_arr, mat_s_arr, mat_a_arr, penalties_arr,
+                        is_srm, is_gravity_phase, tgt_m, num_dof
+                    )
+                
+                # Helper: Compute beam internal forces
+                def _compute_beam_forces(total_u_cand, tgt_m):
+                    F_int_b = np.zeros(num_dof)
+                    for bp in active_beam_props:
+                        u_el_b = np.zeros(4)
+                        for li in range(2):
+                            gi = bp['nodes'][li]
+                            u_el_b[li*2] = total_u_cand[gi*2]
+                            u_el_b[li*2+1] = total_u_cand[gi*2+1]
+                        mat_b = bp['material']
+                        f_int_b_seg, _ = compute_beam_internal_force_yield(
+                            bp['coords'], u_el_b,
+                            mat_b.youngsModulus, mat_b.crossSectionArea,
+                            bp['spacing'], bp['capacity'],
+                            is_srm, tgt_m
+                        )
+                        for li in range(2):
+                            gi = bp['nodes'][li]
+                            F_int_b[gi*2] += f_int_b_seg[li*2]
+                            F_int_b[gi*2+1] += f_int_b_seg[li*2+1]
+                    return F_int_b
+                
+                # Compute initial arc-length radius on first step
+                if step_count == 0:
+                    # For SRM: compute F_ref by perturbation of Msf
+                    if is_srm:
+                        epsilon_msf = 0.01
+                        total_u_current = total_displacement + current_u_incremental
+                        F_int_base = _compute_stresses(total_u_current, current_m_stage)[0]
+                        F_int_base = F_int_base + _compute_beam_forces(total_u_current, current_m_stage)
+                        F_int_pert = _compute_stresses(total_u_current, current_m_stage + epsilon_msf)[0]
+                        F_int_pert = F_int_pert + _compute_beam_forces(total_u_current, current_m_stage + epsilon_msf)
+                        # Negative because increasing Msf reduces strength -> increases out-of-balance
+                        F_ref_srm = -(F_int_pert - F_int_base) / epsilon_msf
+                        f_ref_for_init = F_ref_srm[free_dofs]
+                        msg_fref = f"  > SRM F_ref computed by perturbation (norm: {np.linalg.norm(f_ref_for_init):.4f})"
+                        log.append(msg_fref)
+                        yield {"type": "log", "content": msg_fref}
+                    else:
+                        f_ref_for_init = delta_F_external[free_dofs]
+                    
+                    K_free_init = _assemble_stiffness()
+                    arc_length_radius, _ = compute_initial_arc_length(
+                        step_size, f_ref_for_init, K_free_init
+                    )
+                    msg_al_r = f"  > Arc-length radius (Δl): {arc_length_radius:.6f}"
+                    log.append(msg_al_r)
+                    yield {"type": "log", "content": msg_al_r}
+                
+                al_result = run_arc_length_step(
+                    assemble_stiffness_fn=_assemble_stiffness,
+                    compute_stresses_fn=_compute_stresses,
+                    compute_beam_forces_fn=_compute_beam_forces,
+                    free_dofs=free_dofs,
+                    num_dof=num_dof,
+                    F_int_initial=F_int_initial,
+                    delta_F_external=delta_F_external,
+                    total_displacement=total_displacement,
+                    current_u_incremental=current_u_incremental,
+                    max_iterations=settings.max_iterations,
+                    tolerance=settings.tolerance,
+                    arc_length_radius=arc_length_radius,
+                    sign_lambda=sign_lambda,
+                    current_m_stage=current_m_stage,
+                    is_srm=is_srm,
+                    F_ref_direction=F_ref_srm,  # None for regular phases, perturbation-based for SRM
+                    prev_delta_u_free=prev_delta_u_free  # For limit point detection
                 )
                 
-                # Re-map collections for results consistency
-                temp_phase_stress = {} 
+                converged = bool(al_result['converged'])
+                step_du = al_result['step_du']
+                iteration = int(al_result['iterations'])
+                delta_lambda = float(al_result['delta_lambda'])
+                norm_R = float(al_result['norm_R'])
+                f_base = float(al_result['f_base'])
+                R_free = al_result['R_free']
+                
+                # Re-map stress data from arc-length result
+                temp_phase_stress = {}
                 temp_phase_yield = {}
                 temp_phase_strain = {}
                 temp_phase_pwp_excess = {}
-                for i, ep in enumerate(active_elem_props):
-                    eid = ep['id']
-                    temp_phase_stress[eid] = [new_stresses_arr[i, gp] for gp in range(3)]
-                    temp_phase_yield[eid] = [new_yield_arr[i, gp] for gp in range(3)]
-                    temp_phase_strain[eid] = [new_strain_arr[i, gp] for gp in range(3)]
-                    temp_phase_pwp_excess[eid] = [new_pwp_excess_arr[i, gp] for gp in range(3)]
+                if al_result['stress_data'] is not None:
+                    new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = al_result['stress_data']
+                    for i, ep in enumerate(active_elem_props):
+                        eid = ep['id']
+                        temp_phase_stress[eid] = [new_stresses_arr[i, gp] for gp in range(3)]
+                        temp_phase_yield[eid] = [new_yield_arr[i, gp] for gp in range(3)]
+                        temp_phase_strain[eid] = [new_strain_arr[i, gp] for gp in range(3)]
+                        temp_phase_pwp_excess[eid] = [new_pwp_excess_arr[i, gp] for gp in range(3)]
                 
-                # Add Beam Internal Forces to F_int (with yielding)
-                for bp in active_beam_props:
-                    u_el_b = np.zeros(4)
-                    for li in range(2):
-                        gi = bp['nodes'][li]
-                        u_el_b[li*2] = total_u_candidate[gi*2]
-                        u_el_b[li*2+1] = total_u_candidate[gi*2+1]
+                # For arc-length, target_m_stage is determined by delta_lambda
+                target_m_stage = current_m_stage + delta_lambda
+                if not is_srm:
+                    target_m_stage = min(target_m_stage, 1.0)
+                
+                if al_result['error']:
+                    msg_al_err = f"Arc-Length: {al_result['error']}"
+                    log.append(msg_al_err)
+                    yield {"type": "log", "content": msg_al_err}
+                    print(msg_al_err)
+
+            else:
+                # ==========================================
+                # STANDARD NEWTON-RAPHSON BRANCH (unchanged)
+                # ==========================================
+                iteration = 0
+                converged = False
+                step_du = np.zeros(num_dof) 
+                
+                while iteration < settings.max_iterations:
+                    iteration += 1
                     
-                    mat_b = bp['material']
-                    f_int_b, is_yielded_b = compute_beam_internal_force_yield(
-                        bp['coords'], u_el_b, 
-                        mat_b.youngsModulus, mat_b.crossSectionArea, 
-                        bp['spacing'], bp['capacity'],
-                        is_srm, target_m_stage
+                    total_u_candidate = total_displacement + current_u_incremental + step_du
+                    
+                    # Call Numba Kernel for Internal Forces and Stress Update
+                    F_int, new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = compute_elements_stresses_numba(
+                        elem_nodes_arr,
+                        total_u_candidate,
+                        step_start_stress_arr,
+                        step_start_strain_arr,
+                        step_start_pwp_arr,
+                        B_matrices_arr,
+                        det_J_arr,
+                        weights_arr,
+                        D_elastic_arr,
+                        pwp_static_arr,
+                        mat_drainage_arr,
+                        mat_model_arr,
+                        mat_c_arr,
+                        mat_phi_arr,
+                        mat_su_arr,
+                        mat_sigma_ci_arr,
+                        mat_gsi_arr,
+                        mat_disturb_factor_arr,
+                        mat_mb_arr,
+                        mat_s_arr,
+                        mat_a_arr,
+                        penalties_arr,
+                        is_srm,
+                        is_gravity_phase,
+                        target_m_stage,
+                        num_dof
                     )
                     
-                    for li in range(2):
-                        gi = bp['nodes'][li]
-                        F_int[gi*2] += f_int_b[li*2]
-                        F_int[gi*2+1] += f_int_b[li*2+1]
-
-                
-                # Global Residual
-                R = F_int_initial + (target_m_stage * delta_F_external) - F_int
-                R_free = R[free_dofs]
-                norm_R = np.linalg.norm(R_free)
-                f_base = np.linalg.norm((F_int_initial + delta_F_external)[free_dofs])
-                if f_base < 1.0: f_base = 1.0
-
-                if norm_R / f_base < settings.tolerance and iteration > 1:
-                    converged = True
-                    break
-                
-                # Rebuild Stiffness Matrix (Sparse Assembly) - JIT Optimized
-                # Using element_tangent_matrices (Modified Newton-Raphson) for stability
-                active_elem_D_tangent_arr = np.array([element_tangent_matrices[ep['id']] for ep in active_elem_props])
-                K_values = assemble_stiffness_values_numba(
-                    active_elem_D_tangent_arr,
-                    B_matrices_arr,
-                    det_J_arr,
-                    weights_arr
-                )
-                
-                # Append Beam Stiffness
-                if active_beam_props:
-                    beam_k_vals = []
+                    # Re-map collections for results consistency
+                    temp_phase_stress = {} 
+                    temp_phase_yield = {}
+                    temp_phase_strain = {}
+                    temp_phase_pwp_excess = {}
+                    for i, ep in enumerate(active_elem_props):
+                        eid = ep['id']
+                        temp_phase_stress[eid] = [new_stresses_arr[i, gp] for gp in range(3)]
+                        temp_phase_yield[eid] = [new_yield_arr[i, gp] for gp in range(3)]
+                        temp_phase_strain[eid] = [new_strain_arr[i, gp] for gp in range(3)]
+                        temp_phase_pwp_excess[eid] = [new_pwp_excess_arr[i, gp] for gp in range(3)]
+                    
+                    # Add Beam Internal Forces to F_int (with yielding)
                     for bp in active_beam_props:
-                        beam_k_vals.extend(bp['K'].flatten())
-                    K_values = np.concatenate((K_values, np.array(beam_k_vals)))
-                
-                K_global = sp.coo_matrix((K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
-                K_free = K_global[free_dofs, :][:, free_dofs]
-                
-                # === SOLVER STEP WITH DIAGNOSTICS ===
-                # 1. Check for NaNs or Infs in R_free
-                if not np.all(np.isfinite(R_free)):
-                    msg = f"Solver Error: R_free vector contains NaNs or Infs at iteration {iteration}. Physics likely exploded."
-                    log.append(msg)
-                    print(msg)
-                    yield {"type": "log", "content": msg}
-                    converged = False
-                    break
+                        u_el_b = np.zeros(4)
+                        for li in range(2):
+                            gi = bp['nodes'][li]
+                            u_el_b[li*2] = total_u_candidate[gi*2]
+                            u_el_b[li*2+1] = total_u_candidate[gi*2+1]
+                        
+                        mat_b = bp['material']
+                        f_int_b, is_yielded_b = compute_beam_internal_force_yield(
+                            bp['coords'], u_el_b, 
+                            mat_b.youngsModulus, mat_b.crossSectionArea, 
+                            bp['spacing'], bp['capacity'],
+                            is_srm, target_m_stage
+                        )
+                        
+                        for li in range(2):
+                            gi = bp['nodes'][li]
+                            F_int[gi*2] += f_int_b[li*2]
+                            F_int[gi*2+1] += f_int_b[li*2+1]
 
-                try:
-                    # 2. Solver Call
-                    du_free = spsolve(K_free, R_free)
                     
-                    if not np.all(np.isfinite(du_free)):
-                        raise ValueError("Solver returned NaNs/Infs in displacement vector.")
-                    
-                    # Check for Explosion (Huge Displacement)
-                    # Use a generous multiplier on the user limit (e.g. 100x) or a hard cap like 1e6 meters
-                    limit_val = (settings.max_displacement_limit or 10.0) * 100.0
-                    max_du = np.max(np.abs(du_free))
-                    if max_du > limit_val:
-                         raise ValueError(f"Solver instability detected: Incremental displacement {max_du:.2E} exceeds limit {limit_val:.2E}. Model is likely unstable/unconstrained.")
+                    # Global Residual
+                    R = F_int_initial + (target_m_stage * delta_F_external) - F_int
+                    R_free = R[free_dofs]
+                    norm_R = np.linalg.norm(R_free)
+                    f_base = np.linalg.norm((F_int_initial + delta_F_external)[free_dofs])
+                    if f_base < 1.0: f_base = 1.0
 
-                    step_du[free_dofs] += du_free
+                    if norm_R / f_base < settings.tolerance and iteration > 1:
+                        converged = True
+                        break
                     
-                except Exception as e:
-                    msg_err = f"Solver Error at Iter {iteration}: {str(e)}"
-                    print(f"DEBUG: {msg_err}")
-                    log.append(msg_err)
-                    yield {"type": "log", "content": msg_err}
+                    # Rebuild Stiffness Matrix (Sparse Assembly) - JIT Optimized
+                    # Using element_tangent_matrices (Modified Newton-Raphson) for stability
+                    active_elem_D_tangent_arr = np.array([element_tangent_matrices[ep['id']] for ep in active_elem_props])
+                    K_values = assemble_stiffness_values_numba(
+                        active_elem_D_tangent_arr,
+                        B_matrices_arr,
+                        det_J_arr,
+                        weights_arr
+                    )
                     
-                    # === 3. SINGULARITY DIAGNOSTICS ===
-                    # Analyze K_free for zero rows/cols (Unconstrained DOFs)
-                    # This only catches unattached nodes. Rigid Body Motion (sliding) shows up as valid diagonals but singular matrix.
+                    # Append Beam Stiffness
+                    if active_beam_props:
+                        beam_k_vals = []
+                        for bp in active_beam_props:
+                            beam_k_vals.extend(bp['K'].flatten())
+                        K_values = np.concatenate((K_values, np.array(beam_k_vals)))
+                    
+                    K_global = sp.coo_matrix((K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
+                    K_free = K_global[free_dofs, :][:, free_dofs]
+                    
+                    # === SOLVER STEP WITH DIAGNOSTICS ===
+                    # 1. Check for NaNs or Infs in R_free
+                    if not np.all(np.isfinite(R_free)):
+                        msg = f"Solver Error: R_free vector contains NaNs or Infs at iteration {iteration}. Physics likely exploded."
+                        log.append(msg)
+                        print(msg)
+                        yield {"type": "log", "content": msg}
+                        converged = False
+                        break
+
                     try:
-                        # Check diagonal elements (detects disconnected nodes)
-                        diag = K_free.diagonal()
-                        near_zero_indices = np.where(np.abs(diag) < 1e-6)[0]
+                        # 2. Solver Call
+                        du_free = spsolve(K_free, R_free)
                         
-                        diag_msg = ""
-                        if len(near_zero_indices) > 0:
-                            # Map back to Global Node IDs
-                            bad_dofs_global = free_dofs[near_zero_indices]
-                            
-                            diagnostic_msgs = []
-                            limit_reports = 5
-                            for i, bad_dof in enumerate(bad_dofs_global):
-                                if i >= limit_reports: 
-                                    diagnostic_msgs.append(f"... and {len(bad_dofs_global) - limit_reports} more.")
-                                    break
-                                
-                                node_id = bad_dof // 2
-                                axis = "X" if bad_dof % 2 == 0 else "Y"
-                                diagnostic_msgs.append(f"Node {node_id + 1} (DOF {axis}) has near-zero stiffness.")
-                            
-                            diag_msg = "Weak/Disconnect Nodes: " + "; ".join(diagnostic_msgs)
+                        if not np.all(np.isfinite(du_free)):
+                            raise ValueError("Solver returned NaNs/Infs in displacement vector.")
                         
-                        full_msg = f"Analysis Failed. {diag_msg}"
-                        if not diag_msg:
-                            full_msg += " Possible Rigid Body Motion (Sliding/Rotation) due to missing boundary conditions."
-                            
-                        log.append(full_msg)
-                        yield {"type": "log", "content": full_msg}
-                        print(full_msg)
-                            
-                        # Update error message for UI
-                        phase_results.append({
-                            'phase_id': phase.id,
-                            'success': False,
-                            'displacements': [],
-                            'stresses': [],
-                            'error': f"{str(e)} \nDiagnosis: {full_msg}"
-                        })
-                    except Exception as diag_e:
-                        print(f"Diagnostics failed: {diag_e}")
+                        # Check for Explosion (Huge Displacement)
+                        # Use a generous multiplier on the user limit (e.g. 100x) or a hard cap like 1e6 meters
+                        limit_val = (settings.max_displacement_limit or 10.0) * 100.0
+                        max_du = np.max(np.abs(du_free))
+                        if max_du > limit_val:
+                             raise ValueError(f"Solver instability detected: Incremental displacement {max_du:.2E} exceeds limit {limit_val:.2E}. Model is likely unstable/unconstrained.")
 
-                    converged = False
-                    break
+                        step_du[free_dofs] += du_free
+                        
+                    except Exception as e:
+                        msg_err = f"Solver Error at Iter {iteration}: {str(e)}"
+                        print(f"DEBUG: {msg_err}")
+                        log.append(msg_err)
+                        yield {"type": "log", "content": msg_err}
+                        
+                        # === 3. SINGULARITY DIAGNOSTICS ===
+                        # Analyze K_free for zero rows/cols (Unconstrained DOFs)
+                        # This only catches unattached nodes. Rigid Body Motion (sliding) shows up as valid diagonals but singular matrix.
+                        try:
+                            # Check diagonal elements (detects disconnected nodes)
+                            diag = K_free.diagonal()
+                            near_zero_indices = np.where(np.abs(diag) < 1e-6)[0]
+                            
+                            diag_msg = ""
+                            if len(near_zero_indices) > 0:
+                                # Map back to Global Node IDs
+                                bad_dofs_global = free_dofs[near_zero_indices]
+                                
+                                diagnostic_msgs = []
+                                limit_reports = 5
+                                for i, bad_dof in enumerate(bad_dofs_global):
+                                    if i >= limit_reports: 
+                                        diagnostic_msgs.append(f"... and {len(bad_dofs_global) - limit_reports} more.")
+                                        break
+                                    
+                                    node_id = bad_dof // 2
+                                    axis = "X" if bad_dof % 2 == 0 else "Y"
+                                    diagnostic_msgs.append(f"Node {node_id + 1} (DOF {axis}) has near-zero stiffness.")
+                                
+                                diag_msg = "Weak/Disconnect Nodes: " + "; ".join(diagnostic_msgs)
+                            
+                            full_msg = f"Analysis Failed. {diag_msg}"
+                            if not diag_msg:
+                                full_msg += " Possible Rigid Body Motion (Sliding/Rotation) due to missing boundary conditions."
+                                
+                            log.append(full_msg)
+                            yield {"type": "log", "content": full_msg}
+                            print(full_msg)
+                                
+                            # Update error message for UI
+                            phase_results.append({
+                                'phase_id': phase.id,
+                                'success': False,
+                                'displacements': [],
+                                'stresses': [],
+                                'error': f"{str(e)} \nDiagnosis: {full_msg}"
+                            })
+                        except Exception as diag_e:
+                            print(f"Diagnostics failed: {diag_e}")
+
+                        converged = False
+                        break
             
             # Calculate displacement magnitudes for this step attempt (whether converged or not)
             trial_u = current_u_incremental + step_du
@@ -1423,14 +1578,18 @@ def solve_phases(request: SolverRequest, should_stop=None):
             if converged:
                 step_count += 1
                 current_u_incremental = trial_u
-                current_m_stage = target_m_stage
+                if use_arc_length:
+                    current_m_stage = target_m_stage  # target_m_stage already set from delta_lambda
+                else:
+                    current_m_stage = target_m_stage
                 
                 for eid, stress in temp_phase_stress.items(): phase_stress_history[eid] = stress
                 for eid, strain in temp_phase_strain.items(): phase_strain_history[eid] = strain
                 for eid, yld in temp_phase_yield.items(): phase_yield_history[eid] = yld
                 for eid, pexc in temp_phase_pwp_excess.items(): phase_pwp_excess_history[eid] = pexc
                 
-                msg = f"Phase {phase.name} | Step {step_count}: {m_type} {current_m_stage:.4f} | Max Incremental Disp: {max_disp:.6f} m | Iterations {iteration}"
+                method_label = "(Arc-Length)" if use_arc_length else ""
+                msg = f"Phase {phase.name} | Step {step_count}: {m_type} {current_m_stage:.4f} | Max Incremental Disp: {max_disp:.6f} m | Iterations {iteration} {method_label}"
                 log.append(msg)
                 yield {"type": "log", "content": msg}
                 
@@ -1441,8 +1600,30 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 
                 # Removed SF cap at 10.0 as per user request to see full collapse
 
-                if iteration < settings.min_desired_iterations: step_size *= 1.5
-                elif iteration > settings.max_desired_iterations: step_size *= 0.5
+                if use_arc_length:
+                    # Arc-length step size adaptation based on iteration count
+                    if iteration < settings.min_desired_iterations:
+                        arc_length_radius *= 1.5
+                    elif iteration > settings.max_desired_iterations:
+                        arc_length_radius *= 0.5
+                    # Also scale the nominal step_size for the m_stage capping logic
+                    step_size = abs(delta_lambda) if abs(delta_lambda) > 1e-8 else step_size
+                    
+                    # Update sign_lambda and prev_delta_u for limit point detection
+                    new_sign = al_result.get('sign_lambda_next', sign_lambda)
+                    if new_sign != sign_lambda:
+                        msg_sign = f"  > Limit point detected! sign_lambda flipped: {sign_lambda:+.0f} -> {new_sign:+.0f} (load parameter now {'decreasing' if new_sign < 0 else 'increasing'})"
+                        log.append(msg_sign)
+                        yield {"type": "log", "content": msg_sign}
+                        print(msg_sign)
+                        sign_lambda = new_sign
+                    
+                    conv_du = al_result.get('delta_u_free_converged')
+                    if conv_du is not None:
+                        prev_delta_u_free = conv_du
+                else:
+                    if iteration < settings.min_desired_iterations: step_size *= 1.5
+                    elif iteration > settings.max_desired_iterations: step_size *= 0.5
 
             else:
                 # Failure Diagnostics before cutting step size
@@ -1467,19 +1648,35 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 yield {"type": "log", "content": msg_detail}
                 yield {"type": "log", "content": msg_worst}
 
-                if step_size > (1e-4 if not is_srm else 0.001):
-                     step_size *= 0.5
-                     msg_retry = f"  > Retrying with smaller step size: {step_size:.5f}"
-                     log.append(msg_retry)
-                     print(msg_retry)
-                     yield {"type": "log", "content": msg_retry}
-                     continue
+                if use_arc_length:
+                    if arc_length_radius > 1e-6:
+                        arc_length_radius *= 0.5
+                        step_size *= 0.5
+                        msg_retry = f"  > Arc-Length: Retrying with smaller radius: {arc_length_radius:.6f}"
+                        log.append(msg_retry)
+                        print(msg_retry)
+                        yield {"type": "log", "content": msg_retry}
+                        continue
+                    else:
+                        msg_abort = f"Arc-length radius too small ({arc_length_radius:.6f}). Aborting phase."
+                        log.append(msg_abort)
+                        print(msg_abort)
+                        yield {"type": "log", "content": msg_abort}
+                        break
                 else:
-                    msg_abort = f"Step size too small ({step_size:.5f}). Aborting phase."
-                    log.append(msg_abort)
-                    print(msg_abort)
-                    yield {"type": "log", "content": msg_abort}
-                    break
+                    if step_size > (1e-4 if not is_srm else 0.001):
+                         step_size *= 0.5
+                         msg_retry = f"  > Retrying with smaller step size: {step_size:.5f}"
+                         log.append(msg_retry)
+                         print(msg_retry)
+                         yield {"type": "log", "content": msg_retry}
+                         continue
+                    else:
+                        msg_abort = f"Step size too small ({step_size:.5f}). Aborting phase."
+                        log.append(msg_abort)
+                        print(msg_abort)
+                        yield {"type": "log", "content": msg_abort}
+                        break
 
         # End of Phase Result Gathering
         final_u_total = total_displacement + current_u_incremental
@@ -1522,13 +1719,14 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     sig_xx=sig[0], sig_yy=sig[1], sig_xy=sig[2],
                     sig_zz=sig_zz_val,
                     pwp_steady=pwp_static,
-                    pwp_excess=pwp_excess,
-                    pwp_total=pwp_total,
-                    eps_xx=eps[0], eps_yy=eps[1], eps_xy=eps[2], eps_zz=0.0, # Strain zz can be added if needed
-                    is_yielded=yld, m_stage=current_m_stage
+                    pwp_excess=float(pwp_excess),
+                    pwp_total=float(pwp_total),
+                    eps_xx=float(eps[0]), eps_yy=float(eps[1]), eps_xy=float(eps[2]), eps_zz=0.0,
+                    is_yielded=bool(yld), m_stage=float(current_m_stage)
                 ))
         
-        success = (not is_srm and current_m_stage >= 0.999) or (is_srm and current_m_stage > 1.0)
+        # success = (not is_srm and current_m_stage >= 0.999) or (is_srm and current_m_stage > 1.0)
+        success = (not is_srm and current_m_stage >= 0.999) or (is_srm)
         error_msg = None
         if not success:
             error_msg = f"Phase failed at step {step_count}."

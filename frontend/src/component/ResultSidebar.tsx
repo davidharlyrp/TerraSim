@@ -170,9 +170,9 @@ const ResultSummary = ({ phaseResult, prevPhaseResult, isReset, phaseType }: { p
         <div className="group flex justify-between items-center py-1.5 border-b border-slate-200 dark:border-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors px-1 rounded">
             <span className="text-[10px] text-slate-600 dark:text-slate-400 font-medium">{label}</span>
             <div className="flex items-center gap-2 text-[10px] font-mono">
-                <span className="text-rose-500 dark:text-rose-400/80">{values.min.toPrecision(3)}</span>
+                <span className="text-rose-500 dark:text-rose-400/80">{label === 'Displacement' ? values.min.toPrecision(3) : values.min.toFixed(2)}</span>
                 <span className="text-slate-400 dark:text-slate-600">/</span>
-                <span className="text-emerald-600 dark:text-emerald-400/80">{values.max.toPrecision(3)}</span>
+                <span className="text-emerald-600 dark:text-emerald-400/80">{label === 'Displacement' ? values.max.toPrecision(3) : values.max.toFixed(2)}</span>
                 <span className="text-[9px] text-slate-500 ml-1 w-8 text-right underline decoration-slate-300 dark:decoration-slate-700">{unit}</span>
             </div>
         </div>

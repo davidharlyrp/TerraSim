@@ -175,6 +175,7 @@ class SolverSettings(BaseModel):
     unloading_max_retries: Optional[int] = 5
     max_steps: Optional[int] = 100  # Maximum MStage steps allowed
     max_displacement_limit: Optional[float] = 10.0 # Define "collapse" if disp > 10m
+    use_arc_length: Optional[bool] = False # Use Crisfield arc-length method instead of Newton-Raphson
 
 class PointLoadData(BaseModel):
     node: int  # 0-based node index

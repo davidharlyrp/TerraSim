@@ -207,6 +207,7 @@ export interface SolverSettings {
     max_load_fraction?: number;
     unloading_max_retries?: number;
     max_steps?: number;
+    use_arc_length?: boolean;
 }
 
 export interface PointLoadData {

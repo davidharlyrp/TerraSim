@@ -387,8 +387,33 @@ const MeshResult = ({
             else if (outputType === OutputType.STRAIN_1) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\epsilon_1" /></span>;
             else if (outputType === OutputType.STRAIN_3) currentLabel = <span className="flex items-center gap-1"><MathRender tex="\epsilon_3" /></span>;
 
-            const stressMap = new Map<number, any>();
-            phaseResult?.stresses.forEach(s => stressMap.set(s.element_id, s));
+            // Build per-element GP stress map: element_id -> [gp1, gp2, gp3]
+            const stressGpMap = new Map<number, any[]>();
+            phaseResult?.stresses.forEach(s => {
+                if (!stressGpMap.has(s.element_id)) stressGpMap.set(s.element_id, [null, null, null]);
+                const arr = stressGpMap.get(s.element_id)!;
+                const gpId = s.gp_id ?? 0;
+                if (gpId >= 1 && gpId <= 3) arr[gpId - 1] = s;
+            });
+
+            // Precomputed Extrapolation Matrix E (6×3) for T6 triangle with 3 GPs
+            // Maps 3 Gauss Point values to 6 nodal values using shape function inverse.
+            // E = Nᵀ × (N × Nᵀ)⁻¹ where N[gp][node] = N_node(ξ_gp, η_gp)
+            // GP locations: (1/6,1/6), (2/3,1/6), (1/6,2/3)
+            const EXTRAP_MATRIX: number[][] = [
+                // Node 1 (corner, ξ=0, η=0)
+                [1.6666666666666667, -0.3333333333333333, -0.3333333333333333],
+                // Node 2 (corner, ξ=1, η=0)
+                [-0.3333333333333333, 1.6666666666666667, -0.3333333333333333],
+                // Node 3 (corner, ξ=0, η=1)
+                [-0.3333333333333333, -0.3333333333333333, 1.6666666666666667],
+                // Node 4 (mid 1-2)
+                [0.6666666666666667, 0.6666666666666667, -0.3333333333333333],
+                // Node 5 (mid 2-3)
+                [-0.3333333333333333, 0.6666666666666667, 0.6666666666666667],
+                // Node 6 (mid 3-1)
+                [0.6666666666666667, -0.3333333333333333, 0.6666666666666667]
+            ];
             const dispMap = new Map<number, any>();
             phaseResult?.displacements.forEach(d => dispMap.set(d.id, d));
             const parentDispMap = new Map<number, any>();
@@ -403,7 +428,6 @@ const MeshResult = ({
                 const localWeights = new Map<number, number>();
                 elemIndices.forEach(eIdx => {
                     const elem = mesh.elements[eIdx];
-                    const s = stressMap.get(eIdx + 1);
                     if (outputType === OutputType.DEFORMED_CONTOUR) {
                         elem.forEach(nIdx => {
                             const d = dispMap.get(nIdx + 1);
@@ -461,13 +485,36 @@ const MeshResult = ({
                             }
                         });
                         currentLabel = "Displacement uy (m)";
-                    } else if (s) {
-                        const val = outputType === OutputType.YIELD_STATUS ? (s.is_yielded ? 1 : 0) : getStressValue(s);
-                        if (outputType === OutputType.YIELD_STATUS) currentLabel = "Yield Status";
-                        elem.forEach(nIdx => {
-                            localValues.set(nIdx, (localValues.get(nIdx) || 0) + val);
-                            localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
-                        });
+                    } else {
+                        // Stress/PWP/Strain: Extrapolate from 3 GP values to 6 nodal values
+                        const gpStresses = stressGpMap.get(eIdx + 1);
+                        if (gpStresses && gpStresses[0] && gpStresses[1] && gpStresses[2]) {
+                            if (outputType === OutputType.YIELD_STATUS) {
+                                currentLabel = "Yield Status";
+                                // For yield status, use max of any GP (boolean per element)
+                                const val = (gpStresses[0].is_yielded || gpStresses[1].is_yielded || gpStresses[2].is_yielded) ? 1 : 0;
+                                elem.forEach(nIdx => {
+                                    localValues.set(nIdx, (localValues.get(nIdx) || 0) + val);
+                                    localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
+                                });
+                            } else {
+                                // Compute scalar values at 3 GPs
+                                const gpVals = [
+                                    getStressValue(gpStresses[0]),
+                                    getStressValue(gpStresses[1]),
+                                    getStressValue(gpStresses[2])
+                                ];
+                                // Extrapolate to 6 nodes using E matrix
+                                for (let ni = 0; ni < 6; ni++) {
+                                    const nIdx = elem[ni];
+                                    const nodalVal = EXTRAP_MATRIX[ni][0] * gpVals[0]
+                                        + EXTRAP_MATRIX[ni][1] * gpVals[1]
+                                        + EXTRAP_MATRIX[ni][2] * gpVals[2];
+                                    localValues.set(nIdx, (localValues.get(nIdx) || 0) + nodalVal);
+                                    localWeights.set(nIdx, (localWeights.get(nIdx) || 0) + 1);
+                                }
+                            }
+                        }
                     }
                 });
                 localWeights.forEach((w, nIdx) => {
@@ -518,7 +565,22 @@ const MeshResult = ({
             }> = [];
 
             let activeElemInOrderIdx = 0;
-            let rawMin = Infinity, rawMax = -Infinity; // Range for Legend (Pure values)
+
+            // Compute rawMin/rawMax from actual GP values (for Legend display)
+            // This ensures legend matches ResultSidebar which also uses raw GP values
+            let rawMin = Infinity, rawMax = -Infinity;
+            const isDispOutput = outputType === OutputType.DEFORMED_CONTOUR || outputType === OutputType.DEFORMED_CONTOUR_UX || outputType === OutputType.DEFORMED_CONTOUR_UY;
+            if (!isDispOutput && outputType !== OutputType.YIELD_STATUS) {
+                stressGpMap.forEach((gpArr) => {
+                    for (let gi = 0; gi < 3; gi++) {
+                        if (gpArr[gi]) {
+                            const v = getStressValue(gpArr[gi]);
+                            if (v < rawMin) rawMin = v;
+                            if (v > rawMax) rawMax = v;
+                        }
+                    }
+                });
+            }
 
             polygonGroups.forEach((elemIndices, polyId) => {
                 const localVals = groupNodeValues.get(polyId)!;
@@ -534,7 +596,7 @@ const MeshResult = ({
                     const gpPositions: [number, number, number][] = [];
                     const gpValues: number[] = [];
 
-                    const stressInfo = stressMap.get(eIdx + 1);
+                    const stressInfo = stressGpMap.get(eIdx + 1);
 
                     GP_NAT_COORDS.forEach(([r, s], gpIdx) => {
                         const N = shapeFunctions(r, s);
@@ -579,11 +641,14 @@ const MeshResult = ({
                             if (avgVal < min) min = avgVal;
                             if (avgVal > max) max = avgVal;
 
-                            // Update rawMin/rawMax based on RAW values for Legend (Accurate Extremes)
-                            const triMin = Math.min(v1, v2, v3);
-                            const triMax = Math.max(v1, v2, v3);
-                            if (triMin < rawMin) rawMin = triMin;
-                            if (triMax > rawMax) rawMax = triMax;
+                            // Update rawMin/rawMax for displacement outputs only
+                            // (stress/PWP/strain rawMin/rawMax are pre-computed from GP values above)
+                            if (isDispOutput) {
+                                const triMin = Math.min(v1, v2, v3);
+                                const triMax = Math.max(v1, v2, v3);
+                                if (triMin < rawMin) rawMin = triMin;
+                                if (triMax > rawMax) rawMax = triMax;
+                            }
                         }
                     };
 

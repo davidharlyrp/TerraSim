@@ -136,7 +136,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                                         {update.changes.map((change, cIndex) => (
                                                             <li key={cIndex} className="text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2">
                                                                 <ChevronRight className="w-3 h-3 mt-0.5 text-slate-400 dark:text-slate-500 shrink-0" />
-                                                                <span>{change}</span>
+                                                                <span className='text-left'>{change}</span>
                                                             </li>
                                                         ))}
                                                     </ul>

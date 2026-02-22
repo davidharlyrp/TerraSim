@@ -247,7 +247,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsMaterialOpen(!isMaterialOpen) }}>
-                Materials
+                Materials ({materials.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isMaterialOpen ? "rotate-180" : ""}`} />
@@ -298,7 +298,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsBeamMaterialOpen(!isBeamMaterialOpen) }}>
-                Beam Materials
+                Beam Materials ({beamMaterials.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isBeamMaterialOpen ? "rotate-180" : ""}`} />
@@ -350,7 +350,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsPolygonOpen(!isPolygonOpen) }}>
-                Polygons
+                Polygons ({polygons.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isPolygonOpen ? "rotate-180" : ""}`} />
@@ -429,7 +429,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsWaterOpen(!isWaterOpen) }}>
-                Water Levels
+                Water Levels ({waterLevels.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isWaterOpen ? "rotate-180" : ""}`} />
@@ -506,7 +506,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsLoadOpen(!isLoadOpen) }}>
-                Point Loads
+                Point Loads ({pointLoads.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isLoadOpen ? "rotate-180" : ""}`} />
@@ -586,7 +586,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsLineLoadOpen(!isLineLoadOpen) }}>
-                Line Loads
+                Line Loads ({lineLoads.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isLineLoadOpen ? "rotate-180" : ""}`} />
@@ -688,7 +688,7 @@ export const InputSidebar: React.FC<InputSidebarProps> = ({
             <button
                 className="dropdownlabel2"
                 onClick={() => { setIsEmbeddedBeamOpen(!isEmbeddedBeamOpen) }}>
-                Embedded Beams
+                Embedded Beams ({embeddedBeams.length})
                 <div
                     className="p-1.5 text-slate-600 dark:text-slate-300 rounded transition-colors">
                     <ChevronDown className={`w-4 h-4 transition ${isEmbeddedBeamOpen ? "rotate-180" : ""}`} />

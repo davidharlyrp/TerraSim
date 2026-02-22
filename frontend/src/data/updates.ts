@@ -6,6 +6,15 @@ export interface SoftwareUpdate {
 
 export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
     {
+        version: "v 0.4.2",
+        date: "2026-02-22",
+        changes: [
+            "add arc length control method",
+            "fixed smoothing value for stress and displacement using shape function",
+            "bug fixes"
+        ]
+    },
+    {
         version: "v 0.4.1",
         date: "2026-02-18",
         changes: [
