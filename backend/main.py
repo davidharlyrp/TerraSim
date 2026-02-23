@@ -12,7 +12,7 @@ from backend.mesh_generator import generate_mesh
 from backend.solver import solve_phases
 from backend.solver import solve_phases
 from backend.legacy_models import LegacySequentialRequest, LegacySequentialResponse, LegacyStageResult
-from backend.auth import verify_token, get_current_user, increment_usage_count
+from backend.auth import verify_token, get_current_user, record_running_history
 from backend.limiter import limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
@@ -115,16 +115,15 @@ async def run_solver(solver_req: SolverRequest, request: Request, user_payload: 
     """
     print("Received streaming solver request.")
     
-    # Increment usage tracking (Asynchronous)
+    # Record running history (Asynchronous)
     user_id = user_payload.get("id")
-    current_count = user_payload.get("terrasim_running_count", 0)
     auth_header = request.headers.get("Authorization")
     if auth_header and user_id:
         try:
             token = auth_header.split(" ")[1]
-            asyncio.create_task(increment_usage_count(user_id, current_count, token))
+            asyncio.create_task(record_running_history(user_id, token))
         except Exception as e:
-            print(f"Error starting usage increment task: {e}")
+            print(f"Error starting usage history task: {e}")
     
     async def event_generator():
         stop_flag = [False]

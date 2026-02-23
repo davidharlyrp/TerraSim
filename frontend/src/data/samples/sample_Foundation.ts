@@ -38,6 +38,8 @@ export const SAMPLE_MATERIALS: Material[] = [
         unitWeightSaturated: 16.0,
         unitWeightUnsaturated: 15.0,
         undrainedShearStrength: 30.0, // Su used instead of c, phi
+        k0_x: 0.5,
+        k0_z: 0.5,
         material_model: MaterialModel.MOHR_COULOMB,
         drainage_type: DrainageType.UNDRAINED_B,
     },
@@ -50,6 +52,8 @@ export const SAMPLE_MATERIALS: Material[] = [
         unitWeightSaturated: 15.0,
         unitWeightUnsaturated: 15.0,
         undrainedShearStrength: 50.0, // Su used instead of c, phi
+        k0_x: 0.5,
+        k0_z: 0.5,
         material_model: MaterialModel.MOHR_COULOMB,
         drainage_type: DrainageType.UNDRAINED_C,
     },

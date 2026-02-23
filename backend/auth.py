@@ -104,19 +104,19 @@ def get_current_user(payload: dict = Depends(verify_token)) -> str:
     """
     return payload.get("id")
 
-async def increment_usage_count(user_id: str, current_count: int, token: str):
+async def record_running_history(user_id: str, token: str):
     """
-    Increments the terrasim_running_count for the user in PocketBase.
+    Creates a new record in the terrasim_running_history collection in PocketBase.
     """
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.patch(
-                f"{POCKETBASE_URL}/api/collections/users/records/{user_id}",
-                json={"terrasim_running_count": current_count + 1},
+            response = await client.post(
+                f"{POCKETBASE_URL}/api/collections/terrasim_running_history/records",
+                json={"user_id": user_id},
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=5.0
             )
             if response.status_code != 200:
-                print(f"Failed to increment usage count: {response.status_code} - {response.text}")
+                print(f"Failed to record running history: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"Error incrementing usage count: {str(e)}")
+        print(f"Error recording running history: {str(e)}")

@@ -21,8 +21,7 @@ export const AuthModal: React.FC = () => {
                 await pb.collection('users').create({
                     email,
                     password,
-                    passwordConfirm: password,
-                    terrasim_running_count: 0
+                    passwordConfirm: password
                 });
                 await pb.collection('users').authWithPassword(email, password);
             }
@@ -45,7 +44,7 @@ export const AuthModal: React.FC = () => {
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 uppercase tracking-widest pl-1">Email</label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 pl-1">Email</label>
                         <input
                             type="email"
                             required
@@ -56,7 +55,7 @@ export const AuthModal: React.FC = () => {
                         />
                     </div>
                     <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-slate-700 dark:text-slate-500 uppercase tracking-widest pl-1">Password</label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 pl-1">Password</label>
                         <input
                             type="password"
                             required
@@ -80,7 +79,7 @@ export const AuthModal: React.FC = () => {
 
                 <div className="relative">
                     <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700"></div></div>
-                    <div className="relative flex justify-center text-[10px] uppercase font-bold text-slate-500 px-2 bg-white dark:bg-slate-900 mx-auto w-fit">Or continue with</div>
+                    <div className="relative flex justify-center text-xs font-semibold text-slate-500 px-2 bg-white dark:bg-slate-900 mx-auto w-fit">Or continue with</div>
                 </div>
 
                 <button
