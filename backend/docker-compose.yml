@@ -1,5 +1,7 @@
 services:
   backend:
+    container_name: terrasimapi
+    image: terrasimapi
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,7 +13,3 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
     restart: always
-
-networks:
-  dahar-network:
-    external: true
