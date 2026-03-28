@@ -21,7 +21,9 @@ export const AuthModal: React.FC = () => {
                 await pb.collection('users').create({
                     email,
                     password,
-                    passwordConfirm: password
+                    passwordConfirm: password,
+                    emailVisibility: true,
+                    signup_from: 'TerraSim'
                 });
                 await pb.collection('users').authWithPassword(email, password);
             }

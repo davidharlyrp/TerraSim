@@ -1,0 +1,13 @@
+[package]
+name = "terrasim_core"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance computation kernels for TerraSim FEA solver"
+
+[lib]
+name = "terrasim_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+numpy = "0.24"

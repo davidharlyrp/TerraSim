@@ -23,10 +23,9 @@ from scipy.sparse.linalg import spsolve
 from numba import njit
 from .element_t6 import compute_element_matrices_t6, GAUSS_WEIGHTS
 from .k0_procedure import compute_vertical_stress_k0_t6
-from .mohr_coulomb import mohr_coulomb_yield, return_mapping_mohr_coulomb
-from .hoek_brown import hoek_brown_yield, return_mapping_hoek_brown
 from .element_embedded_beam import compute_beam_element_matrix, compute_beam_internal_force_yield
 from .arc_length import run_arc_length_step, compute_initial_arc_length
+from .stress_rust import compute_elements_stresses_rust
 
 
 @njit
@@ -53,195 +52,6 @@ def assemble_stiffness_values_numba(
         K_values[i*144 : (i+1)*144] = K_el.flatten()
         
     return K_values
-
-
-@njit
-def compute_elements_stresses_numba(
-    element_nodes_arr,
-    total_u_candidate,
-    step_start_stress_arr,
-    step_start_strain_arr,
-    step_start_pwp_arr,
-    B_matrices_arr,
-    det_J_arr,
-    weights_arr,
-    D_elastic_arr,
-    pwp_static_arr,
-    mat_drainage_arr, 
-    mat_model_arr, # 0: LinearElastic, 1: Mohr Coulomb, 2: Hoek-Brown
-    mat_c_arr,
-    mat_phi_arr,
-    mat_su_arr,
-    mat_sigma_ci_arr,
-    mat_gsi_arr,
-    mat_disturb_factor_arr,
-    mat_mb_arr,
-    mat_s_arr,
-    mat_a_arr,
-    penalties_arr,
-    is_srm,
-    is_gravity_phase,
-    target_m_stage,
-    num_dof
-):
-    F_int = np.zeros(num_dof)
-    num_active = len(element_nodes_arr)
-    
-    new_stresses = np.zeros((num_active, 3, 3))
-    new_yield = np.zeros((num_active, 3), dtype=np.bool_)
-    new_strain = np.zeros((num_active, 3, 3))
-    new_pwp_excess = np.zeros((num_active, 3))
-    
-    thickness = 1.0
-    
-    for i in range(num_active):
-        nodes_e = element_nodes_arr[i]
-        
-        u_el = np.zeros(12)
-        for li in range(6):
-            n_idx = nodes_e[li]
-            u_el[li*2] = total_u_candidate[n_idx*2]
-            u_el[li*2+1] = total_u_candidate[n_idx*2+1]
-        
-        f_int_el = np.zeros(12)
-        
-        dtype = mat_drainage_arr[i]
-        mmodel = mat_model_arr[i]
-        D_el = D_elastic_arr[i]
-        c_val = mat_c_arr[i]
-        phi_val = mat_phi_arr[i]
-        su_val = mat_su_arr[i]
-        sigma_ci_val = mat_sigma_ci_arr[i]
-        gsi_val = mat_gsi_arr[i]
-        disturb_factor_val = mat_disturb_factor_arr[i]
-        mb_val = mat_mb_arr[i]
-        s_val = mat_s_arr[i]
-        a_val = mat_a_arr[i]
-        penalty_val = penalties_arr[i]
-        
-        for gp_idx in range(3):
-            B_gp = B_matrices_arr[i, gp_idx]
-            det_J = det_J_arr[i, gp_idx]
-            weight = weights_arr[gp_idx]
-            p_static = pwp_static_arr[i, gp_idx]
-            
-            epsilon_total = B_gp @ u_el
-            start_strain = step_start_strain_arr[i, gp_idx]
-            d_epsilon_step = epsilon_total - start_strain
-            
-            sigma_total_start = step_start_stress_arr[i, gp_idx]
-            pwp_excess_start = step_start_pwp_arr[i, gp_idx]
-            
-            if dtype == 3: # UNDRAINED_C
-                sigma_total_trial = sigma_total_start + D_el @ d_epsilon_step
-                su_eff = su_val
-                if is_srm: su_eff /= target_m_stage
-                
-                if mmodel == 1: # Mohr-Coulomb
-                    sig_new, _, yld = return_mapping_mohr_coulomb(
-                        sigma_total_trial[0], sigma_total_trial[1], sigma_total_trial[2],
-                        su_eff, 0.0, D_el
-                    )
-                else:
-                    sig_new = sigma_total_trial
-                    yld = False
-                p_exc_new = 0.0
-            
-            elif dtype == 1 or dtype == 2: # UNDRAINED_A or B
-                D_total = D_el.copy()
-                D_total[0,0] += penalty_val; D_total[0,1] += penalty_val
-                D_total[1,0] += penalty_val; D_total[1,1] += penalty_val
-                
-                sigma_total_trial = sigma_total_start + D_total @ d_epsilon_step
-                d_vol = d_epsilon_step[0] + d_epsilon_step[1]
-                p_exc_new = pwp_excess_start + penalty_val * d_vol
-                p_total = p_static + p_exc_new
-                
-                sigma_eff_trial = sigma_total_trial - np.array([p_total, p_total, 0.0])
-                
-                if mmodel == 1:
-                    c_eff = c_val; phi_eff = phi_val
-                    if dtype == 2: 
-                        c_eff = su_val
-                        phi_eff = 0.0
-                    
-                    if is_srm:
-                        c_eff /= target_m_stage
-                        if phi_eff > 0:
-                            phi_rad = np.deg2rad(phi_eff)
-                            phi_eff = np.rad2deg(np.arctan(np.tan(phi_rad) / target_m_stage))
-                    
-                    sig_eff_new, _, yld = return_mapping_mohr_coulomb(
-                        sigma_eff_trial[0], sigma_eff_trial[1], sigma_eff_trial[2],
-                        c_eff, phi_eff, D_el
-                    )
-                else:
-                    sig_eff_new = sigma_eff_trial
-                    yld = False
-                sig_new = sig_eff_new + np.array([p_total, p_total, 0.0])
-                
-            else: # DRAINED or NON_POROUS
-                sigma_eff_start = sigma_total_start - np.array([p_static, p_static, 0.0])
-                sigma_eff_trial = sigma_eff_start + D_el @ d_epsilon_step
-                
-                # Refined Elastic Gravity: Skip yield check if gravity phase and drained
-                skip_yield = is_gravity_phase and (dtype == 0)
-
-                if mmodel == 1 and not skip_yield:
-                    c_eff = c_val; phi_eff = phi_val
-                    if is_srm:
-                        c_eff /= target_m_stage
-                        if phi_eff > 0:
-                            phi_rad = np.deg2rad(phi_eff)
-                            phi_eff = np.rad2deg(np.arctan(np.tan(phi_rad) / target_m_stage))
-                    
-                    sig_eff_new, _, yld = return_mapping_mohr_coulomb(
-                        sigma_eff_trial[0], sigma_eff_trial[1], sigma_eff_trial[2],
-                        c_eff, phi_eff, D_el
-                    )
-                elif mmodel == 2 and not skip_yield: # Hoek-Brown
-                    sig_ci_f = sigma_ci_val
-                    mb_f = mb_val
-                    s_f = s_val
-                    gsi_n = gsi_val
-                    disturb_factor_n = disturb_factor_val
-                    a_f = a_val
-                    if is_srm:
-                        sig_ci_f = sigma_ci_val / target_m_stage
-                        mb_f = mb_val / target_m_stage # assuming mb is linear, (simplification)
-                        gsi_n = gsi_val / target_m_stage
-                        disturb_factor_n = disturb_factor_val * target_m_stage
-                        if disturb_factor_n > 1: 
-                            disturb_factor_n = 1
-                        else:
-                            disturb_factor_n = disturb_factor_n
-                        s_f = np.exp((gsi_n - 100) / (9 - 3 * disturb_factor_n))
-                        a_f = 0.5+(np.exp(-gsi_n/15)-np.exp(-20/3))/6
-                        
-                    
-                    sig_eff_new, _, yld = return_mapping_hoek_brown(
-                        sigma_eff_trial[0], sigma_eff_trial[1], sigma_eff_trial[2],
-                        sig_ci_f, mb_f, s_f, a_f, D_el
-                    )
-                else:
-                    sig_eff_new = sigma_eff_trial
-                    yld = False
-                p_exc_new = 0.0
-                sig_new = sig_eff_new + np.array([p_static, p_static, 0.0])
-
-            new_stresses[i, gp_idx] = sig_new
-            new_yield[i, gp_idx] = yld
-            new_strain[i, gp_idx] = epsilon_total
-            new_pwp_excess[i, gp_idx] = p_exc_new
-            
-            f_int_el += B_gp.T @ sig_new * det_J * weight * thickness
-            
-        for li in range(6):
-            gi = nodes_e[li]
-            F_int[gi*2] += f_int_el[li*2]
-            F_int[gi*2+1] += f_int_el[li*2+1]
-            
-    return F_int, new_stresses, new_yield, new_strain, new_pwp_excess
 
 
 def solve_phases(request: SolverRequest, should_stop=None):
@@ -1267,9 +1077,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     _K_global = sp.coo_matrix((_K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
                     return _K_global[free_dofs, :][:, free_dofs]
                 
-                # Helper: Compute stresses via Numba kernel
+                # Helper: Compute stresses via Rust kernel
                 def _compute_stresses(total_u_cand, tgt_m):
-                    return compute_elements_stresses_numba(
+                    return compute_elements_stresses_rust(
                         elem_nodes_arr, total_u_cand,
                         step_start_stress_arr, step_start_strain_arr, step_start_pwp_arr,
                         B_matrices_arr, det_J_arr, weights_arr, D_elastic_arr, pwp_static_arr,
@@ -1394,8 +1204,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     
                     total_u_candidate = total_displacement + current_u_incremental + step_du
                     
-                    # Call Numba Kernel for Internal Forces and Stress Update
-                    F_int, new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = compute_elements_stresses_numba(
+                    # Compute Internal Forces and Stress Update (Rust Kernel)
+                    F_int, new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = compute_elements_stresses_rust(
                         elem_nodes_arr,
                         total_u_candidate,
                         step_start_stress_arr,

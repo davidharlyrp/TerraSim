@@ -161,3 +161,10 @@ dmypy.json
 *.res
 analysis_results/
 plots/ 
+# Rust / Maturin
+backend/rust_core/target/
+*.pyd
+target/
+
+# Test results
+backend/tests/*.txt

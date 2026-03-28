@@ -201,12 +201,34 @@ def compute_vertical_stress_k0_t6(
     else:
         water_pts = np.zeros((0, 2))
 
-    # Call Kernel
-    results_arr, pwp_results_arr = compute_k0_stresses_kernel(
-        gp_coords_all, node_coords, elem_nodes_corner, elem_bboxes,
-        rho_unsat_arr, rho_sat_arr, mat_k0_arr, mat_phi_arr, mat_nu_arr, mat_drainage_arr,
-        water_pts
-    )
+    # Call Rust or Numba Kernel
+    _use_rust_k0 = False
+    try:
+        import terrasim_core
+        _use_rust_k0 = hasattr(terrasim_core, 'compute_k0_stresses')
+    except ImportError:
+        pass
+
+    if _use_rust_k0:
+        results_arr, pwp_results_arr = terrasim_core.compute_k0_stresses(
+            np.ascontiguousarray(gp_coords_all, dtype=np.float64),
+            np.ascontiguousarray(node_coords, dtype=np.float64),
+            np.ascontiguousarray(elem_nodes_corner, dtype=np.int32),
+            np.ascontiguousarray(elem_bboxes, dtype=np.float64),
+            np.ascontiguousarray(rho_unsat_arr, dtype=np.float64),
+            np.ascontiguousarray(rho_sat_arr, dtype=np.float64),
+            np.ascontiguousarray(mat_k0_arr, dtype=np.float64),
+            np.ascontiguousarray(mat_phi_arr, dtype=np.float64),
+            np.ascontiguousarray(mat_nu_arr, dtype=np.float64),
+            np.ascontiguousarray(mat_drainage_arr, dtype=np.int32),
+            np.ascontiguousarray(water_pts, dtype=np.float64),
+        )
+    else:
+        results_arr, pwp_results_arr = compute_k0_stresses_kernel(
+            gp_coords_all, node_coords, elem_nodes_corner, elem_bboxes,
+            rho_unsat_arr, rho_sat_arr, mat_k0_arr, mat_phi_arr, mat_nu_arr, mat_drainage_arr,
+            water_pts
+        )
     
     # Format output
     initial_stresses = {}
