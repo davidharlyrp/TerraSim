@@ -9,3 +9,4 @@ ENV/
 .env.*
 .dockerignore
 Dockerfile
+rust_core/target/
