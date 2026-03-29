@@ -74,7 +74,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         validation_errors.append(get_error_info(ErrorCode.VAL_MAX_STEPS_OOB))
     if (settings.min_desired_iterations or 0) > (settings.max_desired_iterations or 100):
          validation_errors.append(get_error_info(ErrorCode.VAL_ITER_MISMATCH))
-    if len(mesh.elements) > 7000000:
+    if len(mesh.elements) > 10000:
         validation_errors.append(get_error_info(ErrorCode.VAL_OVER_ELEMENT_LIMIT))
 
     if validation_errors:
