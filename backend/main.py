@@ -57,7 +57,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "TerraSim Backend API v 0.4.2 - Active"}
+    return {"message": "TerraSim Backend API v 0.5.0 - Active"}
 
 
 @app.post("/api/mesh/generate", response_model=MeshResponse, tags=["mesh"])
