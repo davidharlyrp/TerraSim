@@ -22,14 +22,20 @@ class PersistenceManager:
             self._state.set_current_file_path(None)
 
     def handle_open(self):
-        """Open a .tsmx file."""
+        """Open a .tsmx file via dialog."""
         if not self._confirm_discard():
             return
 
         file_path, _ = QFileDialog.getOpenFileName(
             self._parent, "Open Project", "", self.FILTER
         )
-        if not file_path:
+        if file_path:
+            self.load_file(file_path)
+
+    def load_file(self, file_path: str):
+        """Programmatically load a .tsmx file without a dialog."""
+        if not os.path.exists(file_path):
+            self._state.log(f"Error: File not found {file_path}")
             return
 
         try:
@@ -38,9 +44,11 @@ class PersistenceManager:
             
             self._state.load_project(data)
             self._state.set_current_file_path(file_path)
-            self._state.log(f"Project loaded from: {os.path.basename(file_path)}")
+            self._state.log(f"Project loaded from: {file_path}")
         except Exception as e:
-            QMessageBox.critical(self._parent, "Error", f"Failed to load project: {e}")
+            msg = f"Failed to load project from {file_path}: {e}"
+            self._state.log(f"Error: {msg}")
+            QMessageBox.critical(self._parent, "Error", msg)
 
     def handle_save(self) -> bool:
         """Save the current project. Prompts for path if first time."""
@@ -72,7 +80,7 @@ class PersistenceManager:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             
-            self._state.log(f"Project saved to: {os.path.basename(path)}")
+            self._state.log(f"Project saved to: {path}")
             return True
         except Exception as e:
             QMessageBox.critical(self._parent, "Error", f"Failed to save project: {e}")

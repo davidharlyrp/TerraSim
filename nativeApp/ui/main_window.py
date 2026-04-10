@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
     Top-level window for the TerraSim native desktop application.
     """
 
-    def __init__(self):
+    def __init__(self, initial_file: str = None):
         super().__init__()
         self.setWindowTitle("TerraSim 0.5.1 Beta - Geotechnical Finite Element Analysis")
         self.resize(1200, 800)
@@ -68,6 +68,12 @@ class MainWindow(QMainWindow):
 
         # Build the UI
         self._init_ui()
+
+        # Load initial project if provided (for file associations)
+        if initial_file:
+            # We defer this slightly to ensure the window is ready
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: self._persistence.load_file(initial_file))
 
         # Connect state signals to console logging
         self.state.tool_mode_changed.connect(self._on_tool_mode_changed)

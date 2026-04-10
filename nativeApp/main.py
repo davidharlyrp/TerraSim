@@ -43,8 +43,15 @@ if __name__ == "__main__":
     # Terapkan tema
     load_stylesheet(app)
     
+    # Get initial file from command line (e.g. from double-clicking a .tsmx)
+    initial_file = None
+    if len(sys.argv) > 1:
+        candidate = sys.argv[1]
+        if os.path.exists(candidate) and candidate.lower().endswith(".tsmx"):
+            initial_file = candidate
+
     # Jalankan Window Utama
-    window = MainWindow()
+    window = MainWindow(initial_file=initial_file)
     window.show()
     
     sys.exit(app.exec())
