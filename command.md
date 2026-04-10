@@ -13,3 +13,7 @@ python dev_runner.py
 
 cd d:\TerraSim\nativeApp\engine\rust_core
 maturin build --release --out /build/wheels
+
+
+## serial number
+TS-ABCDE-0640D
