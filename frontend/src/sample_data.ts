@@ -26,6 +26,7 @@ export const SAMPLE_SOLVER_SETTINGS: SolverSettings = {
     tolerance: 0.01,
     max_load_fraction: 0.5,
     max_steps: 100,
+    realtime_logging: true,
 };
 
 // General Settings

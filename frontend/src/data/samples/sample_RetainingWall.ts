@@ -366,6 +366,7 @@ export const SAMPLE_SOLVER_SETTINGS: SolverSettings = {
     max_load_fraction: 0.5,
     max_steps: 100,
     min_desired_iterations: 3,
+    realtime_logging: true,
     tolerance: 0.01
 };
 

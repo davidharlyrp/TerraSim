@@ -1,0 +1,11 @@
+MeshRequest Polygons: 15
+MeshRequest EBR: 1
+  EBR 55881f58: 0 points
+Clean Boundaries Type: <class 'shapely.geometry.multilinestring.MultiLineString'>
+Total Unique Segments: 503
+Total Unique Vertices: 490
+Clean Boundaries Type: <class 'shapely.geometry.multilinestring.MultiLineString'>
+Clean Boundaries Type: <class 'shapely.geometry.multilinestring.MultiLineString'>
+Clean Boundaries Type: <class 'shapely.geometry.multilinestring.MultiLineString'>
+Clean Boundaries Type: <class 'shapely.geometry.multilinestring.MultiLineString'>
+Clean Boundaries Type: <class 'shapely.geometry.multilinestring.MultiLineString'>

@@ -1,0 +1,11 @@
+PySide6>=6.5.0
+numpy>=1.24.0
+scipy>=1.10.0
+numba>=0.57.0
+shapely>=2.0.0
+triangle>=20220202
+matplotlib>=3.7.0
+ezdxf>=1.0.0
+watchdog>=3.0.0
+pydantic>=2.0.0
+maturin>=1.0.0

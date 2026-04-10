@@ -18,11 +18,12 @@ import { ResultSidebar } from './component/ResultSidebar';
 import { DEFAULT_PHASES, SAMPLE_SOLVER_SETTINGS, SAMPLE_GENERAL_SETTINGS, SAMPLE_MESH_SETTINGS } from './sample_data';
 import { SampleManifest } from './data/samples';
 import { api, ApiError } from './api';
-import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel, EmbeddedBeam, EmbeddedBeamMaterial } from './types';
+import { MeshResponse, SolverResponse, PhaseRequest, Material, PolygonData, PointLoad, LineLoad, GeneralSettings, SolverSettings, MeshSettings, StepPoint, ProjectFile, ProjectMetadata, PhaseType, WaterLevel, EmbeddedBeam, EmbeddedBeamMaterial, TrackPoint } from './types';
 import { MaterialModal } from './component/MaterialModal';
 import { EmbeddedBeamMaterialModal } from './component/EmbeddedBeamMaterialModal';
 import { SettingsModal } from './component/SettingsModal';
 import { CloudLoadModal } from './component/CloudLoadModal';
+import { CurveChartModal } from './component/CurveChartModal';
 import { FeedbackModal } from './component/FeedbackModal';
 import { SampleGalleryModal } from './component/SampleGalleryModal';
 import { propagateMaterialChanges } from './utils/materialUtils';
@@ -48,6 +49,7 @@ function MainApp() {
     const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
     const [isSampleGalleryOpen, setIsSampleGalleryOpen] = useState(false);
+    const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
     // 2. Data State
     const [materials, setMaterials] = useState<Material[]>([]);
@@ -57,6 +59,7 @@ function MainApp() {
     const [lineLoads, setLineLoads] = useState<LineLoad[]>([]);
     const [embeddedBeams, setEmbeddedBeams] = useState<EmbeddedBeam[]>([]); // NEW
     const [waterLevels, setWaterLevels] = useState<WaterLevel[]>([]); // NEW
+    const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]); // NEW
     const [phases, setPhases] = useState<PhaseRequest[]>(DEFAULT_PHASES);
     const [generalSettings, setGeneralSettings] = useState<GeneralSettings>(SAMPLE_GENERAL_SETTINGS);
     const [solverSettings, setSolverSettings] = useState<SolverSettings>(SAMPLE_SOLVER_SETTINGS);
@@ -187,13 +190,13 @@ function MainApp() {
                 mesh: meshResponse,
                 settings: solverSettings as any,
                 phases: phases,
-                // water_level removed
-                water_levels: waterLevels, // NEW
+                water_levels: waterLevels,
                 point_loads: pointLoads,
                 line_loads: lineLoads,
                 materials: materials,
+                beam_materials: beamMaterials,
                 embedded_beams: embeddedBeams,
-                beam_materials: beamMaterials
+                track_points: trackPoints
             }, controller.signal);
 
             if (!response.ok) {
@@ -301,7 +304,7 @@ function MainApp() {
             id: `load_${Date.now()}`,
             x, y,
             fx: 0,
-            fy: -100 // Default downward load
+            fy: -100
         };
         setPointLoads([...pointLoads, newLoad]);
         setDrawMode(null);
@@ -312,7 +315,7 @@ function MainApp() {
             id: `line_load_${Date.now()}`,
             x1, y1, x2, y2,
             fx: 0,
-            fy: -10 // Default downward distributed load
+            fy: -10
         };
         setLineLoads([...lineLoads, newLoad]);
         setDrawMode(null);
@@ -336,7 +339,6 @@ function MainApp() {
         };
         setEmbeddedBeams([...embeddedBeams, newBeam]);
 
-        // Auto-activate in current phase
         const newPhases = [...phases];
         if (newPhases[currentPhaseIdx]) {
             const ph = { ...newPhases[currentPhaseIdx] };
@@ -365,7 +367,6 @@ function MainApp() {
     };
 
     const handleDeleteWaterPoint = (wlIndex: number, ptIndex: number) => {
-        console.log(`Deleting water point ${ptIndex} from level ${wlIndex}`);
         const next = [...waterLevels];
         if (next[wlIndex]) {
             next[wlIndex] = {
@@ -381,7 +382,6 @@ function MainApp() {
             "Delete Water Level",
             "Are you sure you want to delete this water level?",
             () => {
-                console.log(`Deleting water level ${id}`);
                 setWaterLevels(waterLevels.filter(wl => wl.id !== id));
                 if (selectedEntity?.type === 'water_level' && selectedEntity.id === id) setSelectedEntity(null);
                 setConfirmConfig(prev => ({ ...prev, isOpen: false }));
@@ -400,14 +400,12 @@ function MainApp() {
     const handleDeleteBeamMaterial = (id: string) => {
         setBeamMaterials(beamMaterials.filter(m => m.id !== id));
         if (selectedEntity?.type === 'beamMaterial' && selectedEntity.id === id) setSelectedEntity(null);
-        // Clear from beams using it
         setEmbeddedBeams(embeddedBeams.map(b => b.materialId === id ? { ...b, materialId: '' } : b));
     };
 
     const handleDeleteEmbeddedBeam = (id: string) => {
         setEmbeddedBeams(embeddedBeams.filter(b => b.id !== id));
         if (selectedEntity?.type === 'embeddedBeam' && selectedEntity.id === id) setSelectedEntity(null);
-        // Clear from phases
         setPhases(phases.map(p => ({
             ...p,
             active_beam_ids: p.active_beam_ids?.filter(bid => bid !== id) || []
@@ -426,19 +424,19 @@ function MainApp() {
             projectName,
             metadata,
             materials,
-            beamMaterials, // NEW
+            beamMaterials,
             polygons,
             pointLoads,
             lineLoads,
             waterLevel: waterLevels.length > 0 ? waterLevels[0].points : [],
             waterLevels,
-            embeddedBeams, // NEW
+            embeddedBeams,
+            trackPoints,
             phases,
             generalSettings,
             solverSettings,
             meshSettings,
             meshResponse
-            // solverResponse excluded for smaller file size
         };
 
         const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
@@ -463,21 +461,20 @@ function MainApp() {
                     try {
                         const projectFile: ProjectFile = JSON.parse(e.target?.result as string);
                         setMaterials(projectFile.materials || []);
-                        setBeamMaterials(projectFile.beamMaterials || []); // NEW
+                        setBeamMaterials(projectFile.beamMaterials || []);
                         setPolygons(projectFile.polygons || []);
                         setPointLoads(projectFile.pointLoads || []);
                         setLineLoads(projectFile.lineLoads || []);
                         setWaterLevels(projectFile.waterLevels || []);
-                        setEmbeddedBeams(projectFile.embeddedBeams || []); // NEW
+                        setEmbeddedBeams(projectFile.embeddedBeams || []);
+                        setTrackPoints(projectFile.trackPoints || []);
                         setPhases(projectFile.phases || []);
                         setGeneralSettings(projectFile.generalSettings || SAMPLE_GENERAL_SETTINGS);
                         setSolverSettings(projectFile.solverSettings || SAMPLE_SOLVER_SETTINGS);
                         setMeshSettings(projectFile.meshSettings || SAMPLE_MESH_SETTINGS);
                         setProjectName(projectFile.projectName || "Untitled Project");
-                        setCloudProjectId(null); // Reset cloud ID for local load
+                        setCloudProjectId(null);
 
-                        // Switch to input tab after load
-                        // Explicitly clear results for a fresh start
                         setMeshResponse(null);
                         setSolverResponse(null);
                         setActiveTab(WizardTab.INPUT);
@@ -505,21 +502,15 @@ function MainApp() {
             () => {
                 setConfirmConfig(prev => ({ ...prev, isOpen: false }));
 
-                // Reset to initial state
-                // materials
                 setMaterials([]);
                 setBeamMaterials([]);
-                // polygons
                 setPolygons([]);
-                // loads
                 setPointLoads([]);
                 setLineLoads([]);
                 setWaterLevels([]);
-                // embedded beams
                 setEmbeddedBeams([]);
-                // phases
+                setTrackPoints([]);
                 setPhases(DEFAULT_PHASES);
-                // settings
                 setGeneralSettings(SAMPLE_GENERAL_SETTINGS);
                 setSolverSettings(SAMPLE_SOLVER_SETTINGS);
                 setMeshSettings(SAMPLE_MESH_SETTINGS);
@@ -540,7 +531,7 @@ function MainApp() {
 
                 showAlert("New Project", "Started a new project successfully.", 'success');
             },
-            true, // Is Destructive
+            true,
             "Create New"
         );
     };
@@ -569,27 +560,25 @@ function MainApp() {
             waterLevels,
             beamMaterials,
             embeddedBeams,
+            trackPoints,
             phases,
             generalSettings,
             solverSettings,
             meshSettings,
             meshResponse
-            // solverResponse excluded for smaller file size
         };
 
         try {
             setIsCloudSaving(true);
             if (cloudProjectId && !asNew) {
-                // Update existing
                 await pb.collection('terrasim_projects').update(cloudProjectId, {
                     name: projectName,
                     data: projectData
                 });
                 showAlert("Cloud Save Success", "Project saved to cloud successfully!", 'success');
             } else {
-                // Create new
                 const record = await pb.collection('terrasim_projects').create({
-                    user: user.id, // Assuming relation field is named 'user'
+                    user: user.id,
                     name: projectName,
                     data: projectData,
                     version: APP_VERSION
@@ -617,20 +606,20 @@ function MainApp() {
                 setConfirmConfig(prev => ({ ...prev, isOpen: false }));
                 try {
                     setMaterials(projectData.materials || []);
-                    setBeamMaterials(projectData.beamMaterials || []); // NEW
+                    setBeamMaterials(projectData.beamMaterials || []);
                     setPolygons(projectData.polygons || []);
                     setPointLoads(projectData.pointLoads || []);
                     setLineLoads(projectData.lineLoads || []);
                     setWaterLevels(projectData.waterLevels || []);
-                    setEmbeddedBeams(projectData.embeddedBeams || []); // NEW
-                    setPhases(projectData.phases || []);
+                    setEmbeddedBeams(projectData.embeddedBeams || []);
+                    setTrackPoints(projectData.trackPoints || []);
+                    setPhases(projectData.phases || DEFAULT_PHASES);
                     setGeneralSettings(projectData.generalSettings || SAMPLE_GENERAL_SETTINGS);
                     setSolverSettings(projectData.solverSettings || SAMPLE_SOLVER_SETTINGS);
                     setMeshSettings(projectData.meshSettings || SAMPLE_MESH_SETTINGS);
                     setProjectName(projectData.projectName || "Untitled Project");
                     setCloudProjectId(recordId);
 
-                    // Explicitly clear results for a fresh start
                     setMeshResponse(null);
                     setSolverResponse(null);
                     setActiveTab(WizardTab.INPUT);
@@ -654,17 +643,18 @@ function MainApp() {
             `Loading "${sampleProps.name}" will replace current data. Are you sure?`,
             () => {
                 setConfirmConfig(prev => ({ ...prev, isOpen: false }));
-                setIsSampleGalleryOpen(false); // Close gallery
+                setIsSampleGalleryOpen(false);
 
                 const sample = sampleProps.data;
                 setMaterials(sample.materials);
-                setBeamMaterials(sample.beamMaterials || []); // NEW
+                setBeamMaterials(sample.beamMaterials || []);
                 setPolygons(sample.polygons);
                 setPointLoads(sample.pointLoads);
                 setLineLoads(sample.lineLoads || []);
                 setWaterLevels(sample.waterLevels || []);
-                setEmbeddedBeams(sample.embeddedBeams || []); // NEW
-                setPhases(sample.phases);
+                setEmbeddedBeams(sample.embeddedBeams || []);
+                setTrackPoints(sample.trackPoints || []);
+                setPhases(sample.phases || DEFAULT_PHASES);
                 setGeneralSettings(sample.generalSettings || SAMPLE_GENERAL_SETTINGS);
                 setSolverSettings(sample.solverSettings || SAMPLE_SOLVER_SETTINGS);
                 setMeshSettings(sample.meshSettings || SAMPLE_MESH_SETTINGS);
@@ -1061,6 +1051,8 @@ function MainApp() {
                                         generalSettings={generalSettings}
                                         materials={materials}
                                         beamMaterials={beamMaterials}
+                                        trackPoints={trackPoints}
+                                        onTrackPointsChange={setTrackPoints}
                                     />
                                 ) : (
                                     <div className="text-slate-500 text-sm animate-pulse">Click "Generate Mesh" to see the mesh</div>
@@ -1079,6 +1071,8 @@ function MainApp() {
                                     generalSettings={generalSettings}
                                     materials={materials}
                                     beamMaterials={beamMaterials}
+                                    trackPoints={trackPoints}
+                                    onTrackPointsChange={setTrackPoints}
                                 />
                                 <div className={`md:hidden flex items-start justify-center absolute top-0 right-0 w-12 p-2 h-full border-x dark:border-slate-700 border-slate-200 dark:bg-slate-900 bg-slate-100 z-48 ${resultSideBarOpen ? '-translate-x-[calc(100vw-60px)]' : 'translate-x-0'} transition`}>
                                     <button onClick={() => setResultSideBarOpen(!resultSideBarOpen)}>
@@ -1096,6 +1090,7 @@ function MainApp() {
                                             currentPhaseIdx={currentPhaseIdx}
                                             onSelectPhase={setCurrentPhaseIdx}
                                             runningPhaseIdx={solverResponse?.phases.length || 0}
+                                            onOpenCurveGenerator={() => setIsCurveModalOpen(true)}
                                         />
                                     </div>
                                 )}
@@ -1110,6 +1105,7 @@ function MainApp() {
                                         onSelectPhase={setCurrentPhaseIdx}
                                         liveStepPoints={liveStepPoints}
                                         runningPhaseIdx={solverResponse?.phases.length || 0}
+                                        onOpenCurveGenerator={() => setIsCurveModalOpen(true)}
                                     />
                                 )}
                             </div>
@@ -1169,6 +1165,14 @@ function MainApp() {
                 message={alertConfig.message}
                 type={alertConfig.type}
                 onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+            />
+
+            <CurveChartModal
+                isOpen={isCurveModalOpen}
+                onClose={() => setIsCurveModalOpen(false)}
+                solverResult={solverResponse}
+                trackPoints={trackPoints}
+                phases={phases}
             />
 
             <ConfirmModal

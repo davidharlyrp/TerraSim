@@ -2,9 +2,9 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrthographicCamera, OrbitControls, Grid, Line, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { MeshResponse, SolverResponse, OutputType, PhaseRequest, PolygonData, Material, GeneralSettings } from '../types';
+import { MeshResponse, SolverResponse, OutputType, PhaseRequest, PolygonData, Material, GeneralSettings, TrackPoint } from '../types';
 import { MathRender } from './Math';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, MapPin, X } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 interface OutputCanvasProps {
@@ -18,10 +18,13 @@ interface OutputCanvasProps {
     generalSettings: GeneralSettings;
     materials: Material[];
     beamMaterials: any[]; // NEW
+    trackPoints?: TrackPoint[]; // NEW
+    onTrackPointsChange?: (pts: TrackPoint[]) => void; // NEW
 }
 
 interface PolygonProps {
     data: PolygonData;
+    onClick?: (e: any) => void;
 }
 
 // Helper to map 0-1 to Rainbow Color (Blue -> Cyan -> Green -> Yellow -> Red)
@@ -831,7 +834,7 @@ const MeshResult = ({
     );
 };
 
-const Polygon = ({ data }: PolygonProps) => {
+const Polygon = ({ data, onClick }: PolygonProps) => {
     const { points } = useMemo(() => {
         const shape = new THREE.Shape();
         const pts: THREE.Vector3[] = [];
@@ -849,7 +852,7 @@ const Polygon = ({ data }: PolygonProps) => {
     let lineColor = useTheme().theme === 'dark' ? 'white' : '#88909d';
 
     return (
-        <group onContextMenu={(e) => { e.nativeEvent.preventDefault(); e.stopPropagation(); }}>
+        <group onContextMenu={(e) => { e.nativeEvent.preventDefault(); e.stopPropagation(); }} onClick={onClick}>
             {/* Outline */}
             <Line points={points} color={lineColor} lineWidth={2} />
         </group>
@@ -891,9 +894,12 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
     showControls = true,
     ignorePhases = false,
     materials,
-    beamMaterials
+    beamMaterials,
+    trackPoints = [],
+    onTrackPointsChange
 }) => {
     const [sliderValue, setSliderValue] = useState(100);
+    const [isSelectingPoints, setIsSelectingPoints] = useState(false);
     const [outputType, setOutputType] = useState<OutputType>(OutputType.DEFORMED_CONTOUR);
     const [outputCategory, setOutputCategory] = useState<string>('deformed');
     const [range, setRange] = useState<{ min: number, max: number, label: React.ReactNode }>({ min: 0, max: 0, label: "" });
@@ -902,6 +908,12 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
     const [showLog, setShowLog] = useState(false);
     const [showLogOnDesktop, setShowLogOnDesktop] = useState(true);
 
+    const maxScale = useMemo(() => {
+        if (!mesh) return 100;
+        const xRange = Math.max(...mesh.nodes.map(n => n[0])) - Math.min(...mesh.nodes.map(n => n[0]));
+        const yRange = Math.max(...mesh.nodes.map(n => n[1])) - Math.min(...mesh.nodes.map(n => n[1]));
+        return Math.max(xRange, yRange) * 0.5;
+    }, [mesh]);
 
     useEffect(() => {
         if (outputType === OutputType.YIELD_STATUS) {
@@ -1204,6 +1216,34 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                             </label>
                         </div>
 
+                        <div className="p-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Select Points for Curve</span>
+                                <button
+                                    onClick={() => setIsSelectingPoints(!isSelectingPoints)}
+                                    className={`cursor-pointer p-1.5 rounded-md transition-colors ${isSelectingPoints ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 ring-1 ring-blue-500/50' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                                    title="Click on the mesh to select tracking points (Nodes or GPs)"
+                                >
+                                    <MapPin className="w-4 h-4" />
+                                </button>
+                            </div>
+                            {trackPoints.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                    {trackPoints.map((tp, idx) => (
+                                        <div key={idx} className="flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-[10px] px-1.5 py-0.5 rounded border border-blue-200/50 dark:border-blue-800/50">
+                                            <span>{tp.label} ({tp.type})</span>
+                                            <button
+                                                onClick={() => onTrackPointsChange && onTrackPointsChange(trackPoints.filter((_, i) => i !== idx))}
+                                                className="hover:text-red-500 transition-colors ml-0.5"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         {isMobile && (
                             <div className="">
                                 <div className="flex items-center justify-between border-t py-2 border-slate-200 dark:border-slate-700">
@@ -1274,10 +1314,12 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                 {outputType !== OutputType.DEFORMED_MESH && (
                     polygon.map((poly, i) => {
                         return (
-                            <Polygon
-                                key={i}
-                                data={poly}
-                            />
+                            <group key={i}>
+                                <Polygon
+                                    key={i}
+                                    data={poly}
+                                />
+                            </group>
                         );
                     })
                 )}
@@ -1298,7 +1340,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                         />
 
                         {/* Render Nodes if enabled */}
-                        {showNodes && outputType !== OutputType.DEFORMED_MESH && (
+                        {(showNodes || isSelectingPoints) && outputType !== OutputType.DEFORMED_MESH && (
                             <>
                                 {mesh.nodes.map((node, i) => {
                                     // Calculate displacement for this node
@@ -1325,7 +1367,22 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                         <mesh
                                             key={`node-${i}`}
                                             position={[node[0], node[1], 0.1]}
+                                            onClick={(e) => {
+                                                if (isSelectingPoints && onTrackPointsChange) {
+                                                    e.stopPropagation();
+                                                    const id = `node_${nodeId}`;
+                                                    if (trackPoints && trackPoints.find(p => p.id === id)) {
+                                                        onTrackPointsChange(trackPoints.filter(p => p.id !== id));
+                                                    } else {
+                                                        const numSelected = trackPoints ? trackPoints.length : 0;
+                                                        const newLabel = String.fromCharCode(65 + numSelected);
+                                                        const currentPts = trackPoints || [];
+                                                        onTrackPointsChange([...currentPts, { id, type: 'node', index: i, label: newLabel }]);
+                                                    }
+                                                }
+                                            }}
                                             onPointerOver={(e) => {
+                                                if (isSelectingPoints) return;
                                                 if (outputType === OutputType.DEFORMED_CONTOUR || outputType === OutputType.DEFORMED_CONTOUR_UX || outputType === OutputType.DEFORMED_CONTOUR_UY) {
                                                     // No specific node value for these, just general info
                                                 } else if (outputType === OutputType.STRAIN_1 || outputType === OutputType.STRAIN_3) {
@@ -1344,8 +1401,8 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                                 });
                                             }}
                                         >
-                                            <circleGeometry args={[0.02, 8]} />
-                                            <meshBasicMaterial color="#ffffff" />
+                                            <circleGeometry args={[isSelectingPoints ? Math.max(0.005, (maxScale / 100) * 0.1) : 0.005, 8]} />
+                                            <meshBasicMaterial color={(trackPoints && trackPoints.find(p => p.id === `node_${nodeId}`)) ? "#ef4444" : "#ffffff"} />
                                         </mesh>
                                     );
                                 })}
@@ -1353,7 +1410,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                         )}
 
                         {/* Render Gauss Points if enabled */}
-                        {showGaussPoints && outputType !== OutputType.DEFORMED_MESH && (
+                        {(showGaussPoints || isSelectingPoints) && outputType !== OutputType.DEFORMED_MESH && (
                             <>
                                 {mesh.elements.map((elem, elemIdx) => {
                                     // 6-node element: [n1, n2, n3, n4, n5, n6]
@@ -1364,7 +1421,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                     // Optimization: This search is O(N_results), could be slow for huge info.
                                     // Better to assume sorted or use map. For now simple find.
                                     const phaseRes = solverResult?.phases[currentPhaseIdx];
-                                    if (!phaseRes) return null;
+                                    if (!phaseRes && !showGaussPoints && !isSelectingPoints) return null;
 
                                     // 3-point Gauss quadrature (Natural coords)
                                     const gaussPoints = [
@@ -1397,7 +1454,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                         let gpColor = "#ffffff";
 
                                         // Dynamic coloring for Yield Status
-                                        if (outputType === OutputType.YIELD_STATUS) {
+                                        if (outputType === OutputType.YIELD_STATUS && phaseRes) {
                                             const sRes = phaseRes.stresses.find(s => s.element_id === elemIdx + 1 && s.gp_id === gpIdx + 1);
                                             if (sRes && sRes.is_yielded) {
                                                 gpColor = "#ff0000"; // Red for Yield
@@ -1418,7 +1475,7 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
 
                                                     // Backend returns flat list of StressResult per GP
                                                     // We need to find the specific GP result
-                                                    const sr_gp = phaseRes.stresses.find(s => s.element_id === elemIdx + 1 && s.gp_id === gpIdx + 1);
+                                                    const sr_gp = phaseRes?.stresses.find(s => s.element_id === elemIdx + 1 && s.gp_id === gpIdx + 1);
 
                                                     if (sr_gp) {
                                                         const { sig_xx, sig_yy, sig_xy, sig_zz, is_yielded, pwp_excess, pwp_steady, pwp_total } = sr_gp;
@@ -1513,10 +1570,24 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                                                         label: valLabel
                                                     });
                                                 }}
+                                                onClick={(e) => {
+                                                    if (isSelectingPoints && onTrackPointsChange) {
+                                                        e.stopPropagation();
+                                                        const id = `gp_${elemIdx + 1}_${gpIdx}`;
+                                                        if (trackPoints && trackPoints.find(p => p.id === id)) {
+                                                            onTrackPointsChange(trackPoints.filter(p => p.id !== id));
+                                                        } else {
+                                                            const numSelected = trackPoints ? trackPoints.length : 0;
+                                                            const newLabel = String.fromCharCode(65 + numSelected);
+                                                            const currentPts = trackPoints || [];
+                                                            onTrackPointsChange([...currentPts, { id, type: 'gp', index: elemIdx, gp_index: gpIdx, label: newLabel }]);
+                                                        }
+                                                    }
+                                                }}
                                                 onPointerOut={() => setHoveredItem(null)}
                                             >
-                                                <circleGeometry args={[0.02, 8]} />
-                                                <meshBasicMaterial color={gpColor} />
+                                                <circleGeometry args={[isSelectingPoints ? Math.max(0.005, (maxScale / 100) * 0.1) : 0.005, 8]} />
+                                                <meshBasicMaterial color={(trackPoints && trackPoints.find(p => p.id === `gp_${elemIdx + 1}_${gpIdx}`)) ? "#ef4444" : gpColor} />
                                             </mesh>
                                         );
                                     });
@@ -1534,6 +1605,38 @@ export const OutputCanvas: React.FC<OutputCanvasProps> = ({
                         )}
                     </>
                 )}
+
+                {/* Track Point Markers */}
+                {trackPoints.map((tp) => {
+                    let position = new THREE.Vector3();
+                    if (tp.type === "node" && mesh && tp.index < mesh.nodes.length) {
+                        position.set(mesh.nodes[tp.index][0], mesh.nodes[tp.index][1], 0.1);
+                    } else if (tp.type === "gp" && mesh && tp.index < mesh.elements.length) {
+                        const elem = mesh.elements[tp.index];
+                        const p1 = mesh.nodes[elem[0]];
+                        const p2 = mesh.nodes[elem[1]];
+                        const p3 = mesh.nodes[elem[2]];
+                        const GP_NAT_COORDS = [[1 / 6, 1 / 6], [2 / 3, 1 / 6], [1 / 6, 2 / 3]];
+                        const r = GP_NAT_COORDS[tp.gp_index ?? 0][0];
+                        const s = GP_NAT_COORDS[tp.gp_index ?? 0][1];
+                        const t = 1 - r - s;
+                        position.set(
+                            t * p1[0] + r * p2[0] + s * p3[0],
+                            t * p1[1] + r * p2[1] + s * p3[1],
+                            0.1
+                        );
+                    }
+                    return (
+                        <Html key={tp.id} position={position} center zIndexRange={[100, 0]}>
+                            <div className="flex flex-col items-center pointer-events-none group pt-4">
+                                <div className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm border border-red-600/50 mb-1">
+                                    {tp.label}
+                                </div>
+                                <div className="w-2 h-2 bg-white rounded-full border-2 border-red-500 shadow-sm" />
+                            </div>
+                        </Html>
+                    );
+                })}
             </Canvas>
         </div >
     );

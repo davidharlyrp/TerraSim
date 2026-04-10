@@ -6,6 +6,9 @@ export const AuthModal: React.FC = () => {
     const { loginWithGoogle } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [institution, setInstitution] = useState('');
+    const [passwordConfirm, setPasswordConfirm] = useState('');
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -21,7 +24,9 @@ export const AuthModal: React.FC = () => {
                 await pb.collection('users').create({
                     email,
                     password,
-                    passwordConfirm: password,
+                    passwordConfirm: passwordConfirm,
+                    name,
+                    institution,
                     emailVisibility: true,
                     signup_from: 'TerraSim'
                 });
@@ -45,6 +50,32 @@ export const AuthModal: React.FC = () => {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {!isLogin && (
+                        <>
+                            <div className="space-y-1">
+                                <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 pl-1">Name</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="Your Name"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 pl-1">Institution</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={institution}
+                                    onChange={(e) => setInstitution(e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="Your Institution"
+                                />
+                            </div>
+                        </>
+                    )}
                     <div className="space-y-1">
                         <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 pl-1">Email</label>
                         <input
@@ -67,6 +98,21 @@ export const AuthModal: React.FC = () => {
                             placeholder="••••••••"
                         />
                     </div>
+                    {!isLogin && (
+                        <>
+                            <div className="space-y-1">
+                                <label className="text-xs font-semibold text-slate-700 dark:text-slate-500 pl-1">Confirm Password</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={passwordConfirm}
+                                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="••••••••"
+                                />
+                            </div>
+                        </>
+                    )}
 
                     {error && <div className="text-rose-600 dark:text-red-400 text-xs text-center bg-rose-50 dark:bg-red-400/10 p-2 rounded-lg border border-rose-200 dark:border-transparent">{error}</div>}
 

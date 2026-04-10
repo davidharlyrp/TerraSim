@@ -173,6 +173,7 @@ class SolverSettings(BaseModel):
     tolerance: Optional[float] = 0.01
     max_load_fraction: Optional[float] = 0.5
     unloading_max_retries: Optional[int] = 5
+    realtime_logging: Optional[bool] = True
     max_steps: Optional[int] = 100  # Maximum MStage steps allowed
     max_displacement_limit: Optional[float] = 10.0 # Define "collapse" if disp > 10m
     use_arc_length: Optional[bool] = False # Use Crisfield arc-length method instead of Newton-Raphson
@@ -195,6 +196,13 @@ class PhaseRequest(BaseModel):
     active_water_level_id: Optional[str] = None # NEW
     active_beam_ids: Optional[List[str]] = [] # IDs of active beams
 
+class TrackPoint(BaseModel):
+    id: str  # e.g., "node_14" or "gp_10_0" (element 10, gp 0)
+    type: str  # "node" or "gp"
+    index: int  # node index (0-based) or element index (0-based)
+    gp_index: Optional[int] = None # 0, 1, or 2 for element GPs
+    label: str  # "A", "B", etc.
+
 class SolverRequest(BaseModel):
     mesh: MeshResponse
     phases: List[PhaseRequest] # Sequence of phases
@@ -206,6 +214,7 @@ class SolverRequest(BaseModel):
     embedded_beams: Optional[List[EmbeddedBeam]] = [] # NEW
     materials: List[Material] = [] # NEW: Library of all available materials
     beam_materials: List[EmbeddedBeamMaterial] = [] # NEW
+    track_points: Optional[List[TrackPoint]] = [] # Points to track exactly at every Newton step
 
 class NodeResult(BaseModel):
     id: int # 1-based
@@ -239,6 +248,7 @@ class PhaseResult(BaseModel):
     reached_m_stage: Optional[float] = 1.0 # default to 1.0 if successful
     step_failed_at: Optional[int] = None
     error: Optional[str] = None
+    track_data: Optional[dict] = {} # Dict mapping track_point_id to list of step data dicts
 
 class SolverResponse(BaseModel):
     success: bool

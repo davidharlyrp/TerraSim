@@ -151,6 +151,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 </label>
                             </div>
 
+                            {/* Realtime Logging Toggle */}
+                            <div className="flex items-center justify-between group p-3 rounded-lg">
+                                <div className="space-y-0.5">
+                                    <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Real-time Logging</label>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Stream iteration logs and load curves in real-time (Turn off for better performance)</p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={localSolver.realtime_logging ?? true}
+                                        onChange={e => setLocalSolver({ ...localSolver, realtime_logging: e.target.checked })}
+                                    />
+                                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-1 ">
                                 <div className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
                                     <label className="itemlabel">Tolerance <MathRender tex="\epsilon" /></label>

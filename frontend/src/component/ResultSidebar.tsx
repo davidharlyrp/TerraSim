@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SolverResponse, PhaseRequest, StepPoint, PhaseType } from '../types';
 import { useTheme } from '../context/ThemeContext';
-import { ChevronDown, CircleCheck, CircleMinus } from 'lucide-react';
+import { ChevronDown, CircleCheck, CircleMinus, LineChart as LineChartIcon } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const PhaseChart = ({ points, isLive = false, isSafety = false }: { points: StepPoint[], isLive?: boolean, isSafety?: boolean }) => {
@@ -224,10 +224,11 @@ interface ResultSidebarProps {
     onSelectPhase: (idx: number) => void;
     liveStepPoints?: StepPoint[];
     runningPhaseIdx?: number;
+    onOpenCurveGenerator?: () => void;
 }
 
 export const ResultSidebar: React.FC<ResultSidebarProps> = ({
-    solverResult, isRunning, onRun, onCancel, phases, currentPhaseIdx, onSelectPhase, liveStepPoints = [], runningPhaseIdx = 0
+    solverResult, isRunning, onRun, onCancel, phases, currentPhaseIdx, onSelectPhase, liveStepPoints = [], runningPhaseIdx = 0, onOpenCurveGenerator
 }) => {
     const isReset = phases[currentPhaseIdx]?.reset_displacements || false;
     const prevPhaseResult = currentPhaseIdx > 0 ? solverResult?.phases?.[currentPhaseIdx - 1] : null;
@@ -249,7 +250,7 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                     <button
                         onClick={onRun}
                         disabled={isRunning}
-                        className={`cursor-pointer w-full py-2 rounded-xl font-bold text-xs uppercase tracking-widest transition-all md:shadow-lg ${isRunning
+                        className={`cursor-pointer w-full py-2 rounded-xl font-medium text-xs uppercase tracking-widest transition-all md:shadow-lg ${isRunning
                             ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
                             : 'bg-blue-700 hover:bg-blue-600 text-white shadow-blue-500/10 hover:scale-[1.02]'
                             }`}
@@ -268,7 +269,7 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                     {isRunning && (
                         <button
                             onClick={onCancel}
-                            className="cursor-pointer w-full py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all bg-rose-500/10 border border-rose-500/50 text-rose-400 hover:bg-rose-500/20"
+                            className="cursor-pointer w-full py-2 rounded-xl font-medium text-[10px] uppercase tracking-widest transition-all bg-rose-500/10 border border-rose-500/50 text-rose-400 hover:bg-rose-500/20"
                         >
                             Cancel
                         </button>
@@ -277,7 +278,7 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                     <div className="flex items-center justify-center md:block hidden">
                         <button
                             onClick={() => setResultSidebarOpen(!ResultSidebarOpen)}
-                            className="cursor-pointer py-1 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all"
+                            className="cursor-pointer py-1 rounded-xl font-medium text-xs uppercase tracking-widest transition-all"
                         >
                             <ChevronDown className={`transition cursor-pointer w-6 h-6 ${ResultSidebarOpen ? '' : 'rotate-180'}`} />
                         </button>
@@ -341,6 +342,18 @@ export const ResultSidebar: React.FC<ResultSidebarProps> = ({
                                 isReset={isReset}
                                 phaseType={phases[currentPhaseIdx]?.phase_type}
                             />
+
+                            {onOpenCurveGenerator && (
+                                <div className="mt-4 pb-2 text-center">
+                                    <button
+                                        onClick={onOpenCurveGenerator}
+                                        className="w-full cursor-pointer py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all border border-blue-500/30 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                                    >
+                                        <LineChartIcon className="w-4 h-4" />
+                                        Point Curves
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </>
                 )}

@@ -6,10 +6,19 @@ export interface SoftwareUpdate {
 
 export const SOFTWARE_UPDATES: SoftwareUpdate[] = [
     {
+        version: "v 0.5.1",
+        date: "2026-03-30",
+        changes: [
+            "add track points feature",
+            "add toggle on/off realtime calculation",
+            "bug fixes",
+        ]
+    },
+    {
         version: "v 0.5.0",
         date: "2026-03-29",
         changes: [
-            "Migrate solver from python to rust",
+            "Integrate solver from python to rust compiler",
             "Calculation time reduce from 100% to 10%",
             "minor bug fixes",
         ]

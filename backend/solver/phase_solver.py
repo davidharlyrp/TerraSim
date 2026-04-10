@@ -279,6 +279,11 @@ def solve_phases(request: SolverRequest, should_stop=None):
             yield {"type": "log", "content": "Analysis cancelled by user."}
             break
         
+        print(f"Executing Phase {phase_idx + 1}: {phase.name} (type: {phase.phase_type})")
+
+        # Initialize tracking data for this phase
+        phase_track_data = {tp.id: [] for tp in getattr(request, 'track_points', [])}
+
         # Skip children of failed phases
         if phase.parent_id and phase.parent_id in failed_phases:
             msg_skip = f"Skipping phase {phase.name} because parent phase failed."
@@ -374,7 +379,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
 
         # 0. MATERIAL DIFF: Compare current_material vs parent_material
         # For each polygon where material changed, rebuild element matrices.
-        # Also compute incremental gravity load from unit weight difference.
+        # Also compute incremental gravity from unit weight difference.
         delta_F_grav_material = np.zeros(num_dof) # Incremental gravity from material changes
         material_map = {m.id: m for m in request.materials}
         
@@ -1401,12 +1406,58 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 method_label = "(Arc-Length)" if use_arc_length else ""
                 msg = f"Phase {phase.name} | Step {step_count}: {m_type} {current_m_stage:.4f} | Max Incremental Disp: {max_disp:.6f} m | Iterations {iteration} {method_label}"
                 log.append(msg)
-                yield {"type": "log", "content": msg}
+                if getattr(settings, 'realtime_logging', True):
+                    yield {"type": "log", "content": msg}
                 
                 pt = {"m_stage": float(current_m_stage), "max_disp": float(max_disp)}
                 phase_step_points.append(pt)
-                yield {"type": "step_point", "content": pt}
-                print(msg) 
+                if getattr(settings, 'realtime_logging', True):
+                    yield {"type": "step_point", "content": pt}
+                print(msg)
+                
+                # --- Record Track Point Data ---
+                for tp in getattr(request, 'track_points', []):
+                    # Find tracking data for Newton iteration step completion
+                    entry = {"step": step_count, "m_stage": float(current_m_stage)}
+                    if tp.type == "node":
+                        n_idx = tp.index
+                        dof_x, dof_y = n_idx * 2, n_idx * 2 + 1
+                        if n_idx < len(nodes):
+                            entry["ux"] = float(trial_u[dof_x])
+                            entry["uy"] = float(trial_u[dof_y])
+                            entry["total_ux"] = float(total_displacement[dof_x] + trial_u[dof_x])
+                            entry["total_uy"] = float(total_displacement[dof_y] + trial_u[dof_y])
+                    elif tp.type == "gp":
+                        e_idx = tp.index
+                        gp_idx = tp.gp_index if tp.gp_index is not None else 0
+                        # Try to get from temp updated state, fallback to prev state
+                        st = temp_phase_stress.get(e_idx + 1)
+                        pexc = temp_phase_pwp_excess.get(e_idx + 1)
+                        if not st: 
+                            st = element_stress_state.get(e_idx + 1)
+                            pexc = element_pwp_excess_state.get(e_idx + 1)
+                        
+                        if st and gp_idx < len(st):
+                            sig = st[gp_idx]
+                            entry["sig_xx"] = float(sig[0])
+                            entry["sig_yy"] = float(sig[1])
+                            entry["sig_xy"] = float(sig[2])
+                            entry["sig_zz"] = float(sig[3]) if len(sig) > 3 else float(0.3 * (sig[0] + sig[1]))
+                            # PWP approximation (assume element uniform if not arrayed by GP, but here we just use scalar if array)
+                            px = pexc[gp_idx] if pexc and hasattr(pexc, '__len__') and gp_idx < len(pexc) else 0.0
+                            entry["pwp_excess"] = float(px)
+                            
+                        # Strain
+                        sr = temp_phase_strain.get(e_idx + 1)
+                        if not sr: sr = element_strain_state.get(e_idx + 1)
+                        if sr and gp_idx < len(sr):
+                            eps = sr[gp_idx]
+                            entry["eps_xx"] = float(eps[0])
+                            entry["eps_yy"] = float(eps[1])
+                            entry["eps_xy"] = float(eps[2])
+                    
+                    phase_track_data[tp.id].append(entry)
+                # -------------------------------
                 
                 # Removed SF cap at 10.0 as per user request to see full collapse
 
@@ -1550,7 +1601,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
             'reached_m_stage': current_m_stage,
             'step_points': phase_step_points,
             'step_failed_at': step_count if not success else None,
-            'error': error_msg
+            'error': error_msg,
+            'track_data': phase_track_data
         }
         phase_results.append(phase_details)
         yield {"type": "phase_result", "content": phase_details}

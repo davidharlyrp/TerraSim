@@ -147,6 +147,7 @@ export interface ProjectFile {
     waterLevels: WaterLevel[]; // NEW
     embeddedBeams: EmbeddedBeam[]; // NEW
     beamMaterials: EmbeddedBeamMaterial[]; // NEW
+    trackPoints?: TrackPoint[]; // NEW: Points to track history
     phases: PhaseRequest[];
     generalSettings: GeneralSettings;
     solverSettings: SolverSettings;
@@ -208,6 +209,7 @@ export interface SolverSettings {
     unloading_max_retries?: number;
     max_steps?: number;
     use_arc_length?: boolean;
+    realtime_logging?: boolean;
 }
 
 export interface PointLoadData {
@@ -242,6 +244,15 @@ export interface SolverRequest {
     materials?: Material[]; // NEW: Material library for overrides
     embedded_beams?: EmbeddedBeam[]; // NEW
     beam_materials?: EmbeddedBeamMaterial[]; // NEW
+    track_points?: TrackPoint[]; // NEW
+}
+
+export interface TrackPoint {
+    id: string; // e.g. "node_14", "gp_10_0"
+    type: "node" | "gp";
+    index: number; // 0-based node or element index
+    gp_index?: number; // 0, 1, or 2 for GPs
+    label: string; // "A", "B", etc.
 }
 
 export interface NodeResult {
@@ -280,10 +291,11 @@ export interface PhaseResult {
     displacements: NodeResult[];
     stresses: StressResult[];
     pwp: number[];
-    reached_m_stage?: number;
+    reached_m_stage: number;
     step_points?: StepPoint[];
-    step_failed_at?: number;
-    error?: string;
+    step_failed_at?: number | null;
+    error?: string | null;
+    track_data?: Record<string, any[]>; // Dict mapping TrackPoint.id to its step data history
 }
 
 export interface SolverResponse {
