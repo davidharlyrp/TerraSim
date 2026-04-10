@@ -10,3 +10,6 @@ uvicorn backend.main:app --reload --port 8010
 cd d:\TerraSim\nativeApp
 .\venv\Scripts\activate
 python dev_runner.py
+
+cd d:\TerraSim\nativeApp\engine\rust_core
+maturin build --release --out /build/wheels
