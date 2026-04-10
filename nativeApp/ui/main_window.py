@@ -211,6 +211,41 @@ class MainWindow(QMainWindow):
 
         # Create menus now that all components exist
         self._create_menus()
+        
+        # --- 7. STATUS BAR (License Info) ---
+        self._init_status_bar()
+
+    def _init_status_bar(self):
+        """Displays registration info in the bottom status bar."""
+        from PySide6.QtCore import QSettings
+        from core.licensing import unpack_license_data, verify_serial
+        
+        settings = QSettings("DaharEngineer", "TerraSim")
+        license_key = settings.value("license_key", "", type=str)
+        
+        user_name = "Unregistered"
+        user_email = "Evaluation Mode"
+        
+        # Decode directly from the key for security
+        if license_key and verify_serial(license_key):
+            _, data_part, _ = license_key.split("-")
+            info = unpack_license_data(data_part)
+            if info:
+                user_name = info.get("name", "User")
+                user_email = info.get("email", "N/A")
+        
+        status = self.statusBar()
+        status.setFixedHeight(24)
+        status.setStyleSheet("""
+            QStatusBar { 
+                background: #f4f4f5; 
+                color: #71717a; 
+                font-size: 11px;
+                border-top: 1px solid #e4e4e7;
+            }
+            QStatusBar::item { border: none; }
+        """)
+        status.showMessage(f"  Licensed to: {user_name} ({user_email})")
 
     def _create_menus(self):
         """Build the top menu bar (File, Edit, View, etc.)."""

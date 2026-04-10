@@ -3,6 +3,23 @@ import sys
 import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
+from core.licensing import verify_serial
+from ui.activation_dialog import ActivationDialog
+
+def check_license():
+    """Returns True if the application is correctly activated."""
+    from PySide6.QtCore import QSettings
+    settings = QSettings("DaharEngineer", "TerraSim")
+    
+    # Rapid check for status
+    is_activated = settings.value("is_activated", False, type=bool)
+    if not is_activated:
+        return False
+        
+    # Security re-validation of the stored key
+    key = settings.value("license_key", "", type=str)
+    return verify_serial(key)
+
 from ui.main_window import MainWindow
 
 def resource_path(relative_path):
@@ -43,6 +60,16 @@ if __name__ == "__main__":
     # Terapkan tema
     load_stylesheet(app)
     
+    # --- LICENSE CHECK ---
+    # First, check if the license is already valid in QSettings
+    if not check_license():
+        # Hide splash or just show dialog
+        dlg = ActivationDialog()
+        # If user closes dialog without activation, exit app
+        if dlg.exec() != ActivationDialog.Accepted:
+            sys.exit(0)
+    # --- END LICENSE CHECK ---
+
     # Get initial file from command line (e.g. from double-clicking a .tsmx)
     initial_file = None
     if len(sys.argv) > 1:
