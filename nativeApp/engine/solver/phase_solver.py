@@ -8,7 +8,7 @@ import time
 from typing import List, Dict, Optional
 from engine.models import (
     SolverRequest, SolverResponse, NodeResult, StressResult, MaterialModel, DrainageType, Point,
-    MeshResponse, Material, PhaseType, SolverSettings, PhaseResult
+    MeshResponse, Material, PhaseType, SolverSettings, PhaseResult, BeamResult
 )
 try:
     from engine.error import ErrorCode, get_error_info
@@ -33,7 +33,11 @@ except ImportError:
 from numba import njit
 from .element_t6 import compute_element_matrices_t6, GAUSS_WEIGHTS
 from .k0_procedure import compute_vertical_stress_k0_t6
-from .element_embedded_beam import compute_beam_element_matrix, compute_beam_internal_force_yield
+from .element_embedded_beam import (
+    compute_beam_element_matrix, 
+    compute_beam_internal_force_yield,
+    compute_beam_forces_local
+)
 from .arc_length import run_arc_length_step, compute_initial_arc_length
 from .stress_rust import compute_elements_stresses_rust
 
@@ -115,7 +119,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         return
 
     num_nodes = len(mesh.nodes)
-    num_dof = num_nodes * 2
+    num_dof = num_nodes * 3
     nodes = mesh.nodes
     elements = mesh.elements
     
@@ -154,8 +158,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
             continue
             
         coords = np.array([nodes[n] for n in elem_nodes])  # (6, 2)
-        # Use initial/default water level for first pass
-        K_el, F_grav, gauss_point_data, D = compute_element_matrices_t6(coords, mat, water_level=default_water_level)
+        # Use initial/default water level for first pass. kh/kv default to 0.0 for initial setup.
+        K_el, F_grav, gauss_point_data, D = compute_element_matrices_t6(
+            coords, mat, water_level=default_water_level, kh=0.0, kv=0.0
+        )
         
         if K_el is None: continue
         
@@ -191,11 +197,19 @@ def solve_phases(request: SolverRequest, should_stop=None):
             # Beam Nodes (1-based from assignment)
             b_nodes = [nid - 1 for nid in assign.nodes] # 0-based
             if len(b_nodes) < 2: continue
-            
-            # We treat the beam chain as a series of 2-node truss elements
+
+            # Ensure consistent orientation (Y-first then X)
+            # This prevents sawtooth in slanted beams due to inconsistent T-matrices.
+            if len(b_nodes) >= 2:
+                n1_coord = nodes[b_nodes[0]]
+                n2_coord = nodes[b_nodes[-1]]
+                # Standardize: n1 should be higher (larger Y)
+                if n1_coord[1] < n2_coord[1] or (n1_coord[1] == n2_coord[1] and n1_coord[0] > n2_coord[0]):
+                    b_nodes.reverse()
+
             mat = beam_mat_map.get(beam.materialId)
             if not mat: continue
-            
+
             # First pass: compute lengths and basic properties
             segments = []
             for i in range(len(b_nodes) - 1):
@@ -203,40 +217,55 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 n2 = b_nodes[i+1]
                 coords = np.array([nodes[n1], nodes[n2]])
                 L = np.linalg.norm(coords[1] - coords[0])
+                if L < 1e-9: continue # Skip zero-length segments
                 segments.append({'nodes': [n1, n2], 'coords': coords, 'L': L})
             
-            # Second pass: calculate capacities (Integrate from tip upwards)
-            # T_max is kN/m, F_max is kN.
+            # Second pass: calculate capacities 
+            # (Capacities are cumulative from tip resistance at the bottom)
             t_max = mat.skinFrictionMax
             f_tip = mat.tipResistanceMax
             spacing = mat.spacing
             inv_spacing = 1.0 / spacing if spacing > 1e-9 else 1.0
             
-            cumulative_capacity = f_tip * inv_spacing
-            # Iterate segments in reverse (from tip to top)
+            # Pre-calculate capacities for each segment to allow forward iteration
+            seg_capacities = [0.0] * len(segments)
+            curr_cap = f_tip * inv_spacing
             for i in range(len(segments) - 1, -1, -1):
                 seg = segments[i]
-                # Increment capacity by skin friction of THIS segment
-                cumulative_capacity += (t_max * seg['L']) * inv_spacing
+                curr_cap += (t_max * seg['L']) * inv_spacing
+                seg_capacities[i] = curr_cap
+
+            # Resolve global head node for this beam (Head-to-Tip ordering)
+            h_idx = beam.head_point_index or 0 # 0=P1, 1=P2
+            global_head_gi = b_nodes[0] if h_idx == 0 else b_nodes[-1]
+            head_conn_type = str(beam.head_connection_type).upper()
+
+            # Iterate segments from Head to Tip (0 to N) to ensure correct result ordering
+            for i in range(len(segments)):
+                seg = segments[i]
                 
-                # Compute K_truss and F_grav
+                # Compute K_frame and F_grav
                 E = mat.youngsModulus
                 A = mat.crossSectionArea
+                I = getattr(mat, 'momentOfInertia', 1e-6)
                 unit_weight = mat.unitWeight
                 
-                K_b, F_grav_b = compute_beam_element_matrix(seg['coords'], E, A, spacing, unit_weight)
+                K_b, F_grav_b = compute_beam_element_matrix(seg['coords'], E, A, I, spacing, unit_weight, kh=0.0, kv=0.0)
                 
                 beam_props_all.append({
                     'id': f"{beam.id}_seg_{i}",
                     'beam_index': b_idx,
                     'nodes': seg['nodes'],
                     'coords': seg['coords'],
+                    'L': seg['L'],
                     'K': K_b,
                     'F_grav': F_grav_b,
                     'material': mat,
                     'beam_id': beam.id,
-                    'capacity': cumulative_capacity,
-                    'spacing': spacing
+                    'capacity': seg_capacities[i],
+                    'spacing': spacing,
+                    'global_head_gi': global_head_gi,
+                    'head_connection_type': head_conn_type
                 })
 
     # Global State Tracking - T6: Store state per Gauss Point (List of 3 items per element)
@@ -310,6 +339,21 @@ def solve_phases(request: SolverRequest, should_stop=None):
             msg_skip = f"Skipping phase {phase.name} because parent phase failed."
             log.append(msg_skip)
             yield {"type": "log", "content": msg_skip}
+            
+            # Formally report as failed to UI so counters update
+            skipped_details = {
+                'phase_id': phase.id,
+                'success': False,
+                'error': "Parent phase failed. Calculation skipped.",
+                'reached_m_stage': 0.0,
+                'step_points': [],
+                'displacements': [],
+                'stresses': [],
+                'track_data': {}
+            }
+            phase_results.append(skipped_details)
+            yield {"type": "phase_result", "content": skipped_details}
+            
             failed_phases.add(phase.id)
             continue
         
@@ -344,13 +388,14 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     bp['F_grav'] = F_grav.copy()
         elif not phase.parent_id:
             # First phase (no parent) — use initial state
-            total_displacement = initial_snapshot['total_displacement'].copy()
-            element_stress_state = copy.deepcopy(initial_snapshot['element_stress_state'])
-            element_strain_state = copy.deepcopy(initial_snapshot['element_strain_state'])
-            element_yield_state = copy.deepcopy(initial_snapshot['element_yield_state'])
-            element_pwp_excess_state = copy.deepcopy(initial_snapshot['element_pwp_excess_state'])
-            current_water_level_data = copy.deepcopy(initial_snapshot['current_water_level_data'])
-            current_water_level_id = initial_snapshot['current_water_level_id']
+            snapshot = initial_snapshot
+            total_displacement = snapshot['total_displacement'].copy()
+            element_stress_state = copy.deepcopy(snapshot['element_stress_state'])
+            element_strain_state = copy.deepcopy(snapshot['element_strain_state'])
+            element_yield_state = copy.deepcopy(snapshot['element_yield_state'])
+            element_pwp_excess_state = copy.deepcopy(snapshot['element_pwp_excess_state'])
+            current_water_level_data = copy.deepcopy(snapshot['current_water_level_data'])
+            current_water_level_id = snapshot['current_water_level_id']
 
         if phase.reset_displacements:
             total_displacement = np.zeros(num_dof)
@@ -472,8 +517,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                             delta_F_grav_el = F_grav - old_F_grav
                             # Map element local DOFs to global DOFs
                             for local_idx, node_id in enumerate(ep['nodes']):
-                                global_dof_x = node_id * 2
-                                global_dof_y = node_id * 2 + 1
+                                global_dof_x = node_id * 3
+                                global_dof_y = node_id * 3 + 1
                                 delta_F_grav_material[global_dof_x] += delta_F_grav_el[local_idx * 2]
                                 delta_F_grav_material[global_dof_y] += delta_F_grav_el[local_idx * 2 + 1]
                         
@@ -499,15 +544,34 @@ def solve_phases(request: SolverRequest, should_stop=None):
             for n_idx in ep['nodes']:
                 active_node_indices.add(n_idx)
 
-        # 2.1 Identify Active Beams
+        # 2.1 Identify Active Beams and their Activation Reference (u_ref)
         active_beam_props = []
+        active_beam_ids_set = set()
+        beam_u_ref_map = {} # Maps segment_id -> u_ref (6-dof)
+        
+        parent_beam_u_ref = snapshot.get('beam_u_ref', {})
+
         if phase.active_beam_ids:
             active_beam_ids_set = set(phase.active_beam_ids)
             active_beam_props = [bp for bp in beam_props_all if bp['beam_id'] in active_beam_ids_set]
             
             for bp in active_beam_props:
+                seg_id = bp['id']
                 for n_idx in bp['nodes']:
                     active_node_indices.add(n_idx)
+                
+                # Check if this beam was already active in the parent phase
+                if seg_id in parent_beam_u_ref:
+                    beam_u_ref_map[seg_id] = parent_beam_u_ref[seg_id]
+                else:
+                    # NEWLY ACTIVATED: Capture current total_displacement as its zero reference
+                    u_ref_b = np.zeros(6)
+                    for li in range(2):
+                        gi = bp['nodes'][li]
+                        u_ref_b[li*3] = total_displacement[gi*3]
+                        u_ref_b[li*3+1] = total_displacement[gi*3+1]
+                        u_ref_b[li*3+2] = total_displacement[gi*3+2]
+                    beam_u_ref_map[seg_id] = u_ref_b
 
         # Handle K0 Procedure
         if phase.phase_type == PhaseType.K0_PROCEDURE:
@@ -585,7 +649,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
             nodes_e = ep['nodes']
             dofs = []
             for n in nodes_e:
-                dofs.extend([n*2, n*2+1])
+                # Soil Elements only use u, v (3n, 3n+1)
+                dofs.extend([n*3, n*3+1])
             for r_dof in dofs:
                 for c_dof in dofs:
                     rows.append(r_dof)
@@ -596,11 +661,19 @@ def solve_phases(request: SolverRequest, should_stop=None):
             nodes_b = bp['nodes']
             dofs = []
             for n in nodes_b:
-                dofs.extend([n*2, n*2+1])
+                # Beam Elements use u, v, theta (3n, 3n+1, 3n+2)
+                dofs.extend([n*3, n*3+1, n*3+2])
             for r_dof in dofs:
                 for c_dof in dofs:
                     rows.append(r_dof)
                     cols.append(c_dof)
+                    
+        # Add Stabilization terms (small base stiffness for ALL DOFs)
+        for i in range(num_nodes):
+            for d in range(3):
+                dof = i*3 + d
+                rows.append(dof)
+                cols.append(dof)
 
         active_row_indices = np.array(rows, dtype=np.int32)
         active_col_indices = np.array(cols, dtype=np.int32)
@@ -615,12 +688,27 @@ def solve_phases(request: SolverRequest, should_stop=None):
         else:
             # Build adjacency graph
             adj = {n: [] for n in active_nodes_set}
+            
+            # Add Soil Element Connectivity
             for ep in active_elem_props:
                 enodes = ep['nodes']
                 for i in range(6):
                     u = enodes[i]
                     for j in range(i+1, 6):
                         v = enodes[j]
+                        if u in adj and v in adj:
+                            adj[u].append(v)
+                            adj[v].append(u)
+            
+            # Add Beam Connectivity
+            for bp in active_beam_props:
+                bnodes = bp['nodes']
+                # Iterate over all nodes in the segment to build connectivity
+                n_count = len(bnodes)
+                for i in range(n_count):
+                    u = bnodes[i]
+                    for j in range(i+1, n_count):
+                        v = bnodes[j]
                         if u in adj and v in adj:
                             adj[u].append(v)
                             adj[v].append(u)
@@ -667,23 +755,62 @@ def solve_phases(request: SolverRequest, should_stop=None):
         for bp in active_beam_props:
             K_values.extend(bp['K'].flatten())
             
+        # Add stabilization values to match the indices added in Step 3
+        for _ in range(num_nodes * 3):
+            K_values.append(1e-9)
+            
         K_global = sp.coo_matrix((K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
         
         # 4. Apply Boundary Conditions
         fixed_dofs = set()
         for bc in mesh.boundary_conditions.full_fixed:
-            fixed_dofs.add(bc.node * 2)
-            fixed_dofs.add(bc.node * 2 + 1)
+            fixed_dofs.add(bc.node * 3)
+            fixed_dofs.add(bc.node * 3 + 1)
+            # Don't manually fix rotation (+2) here; let beams and stabilizers handle it.
         
         xs = [p[0] for p in nodes]; min_x, max_x = min(xs), max(xs)
         for bc in mesh.boundary_conditions.normal_fixed:
             nx = nodes[bc.node][0]
             if abs(nx - min_x) < 1e-3 or abs(nx - max_x) < 1e-3:
-                fixed_dofs.add(bc.node * 2)
+                fixed_dofs.add(bc.node * 3)
+        
+        # Add beam head rotation constraints (ONLY once per beam)
+        processed_heads = set()
+        for bp in active_beam_props:
+            bid = bp['beam_id']
+            if bid in processed_heads: continue
+            
+            # Use standardized string comparison for PIN vs FIXED
+            conn_type = str(bp.get('head_connection_type', 'FIXED')).upper()
+            gi_head = bp.get('global_head_gi')
+            
+            if gi_head is not None:
+                # Get head coordinates for verification
+                hx, hy = nodes[gi_head]
+                
+                # Use print() to force terminal output (UI yield logs might be buffered or missing)
+                print(f"  - Head Point: Node {gi_head} at (x={hx:.3f}, y={hy:.3f})")
+                print(f"  - Head Type: {conn_type}")
+                
+                # Check for Global BC Override
+                is_globally_fixed = gi_head in [bc.node for bc in mesh.boundary_conditions.full_fixed]
+                if is_globally_fixed:
+                    print(f"  ! WARNING: Node {gi_head} is part of a FULL FIXED boundary. Fixed setting will override PINNED.")
+
+                # Apply fixity
+                if conn_type in ["FIXED", "FIX"]:
+                    fixed_dofs.add(gi_head * 3 + 2)
+                    print(f"  ---> [ACTION] Constraint applied: Fixed Rotation (DOF {gi_head * 3 + 2})")
+                    yield {"type": "log", "content": f"  - Beam '{bid}': Head Node {gi_head} set to FIXED"}
+                else:
+                    print(f"  ---> [ACTION] No constraint: Rotation remains FREE (PINNED)")
+                    yield {"type": "log", "content": f"  - Beam '{bid}': Head Node {gi_head} set to PINNED"}
+                
+                processed_heads.add(bid)
         
         free_dofs = []
         for d in range(num_dof):
-            node_idx = d // 2
+            node_idx = d // 3
             if d not in fixed_dofs and node_idx in active_node_indices:
                 free_dofs.append(d)
         free_dofs = np.array(free_dofs, dtype=np.int32)
@@ -708,7 +835,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 # Newly activated -> Add full gravity
                 for li in range(6):
                     gi = ep['nodes'][li]
-                    delta_F_external[gi*2:gi*2+2] += ep['F_grav'][li*2:li*2+2]
+                    delta_F_external[gi*3] += ep['F_grav'][li*2]
+                    delta_F_external[gi*3+1] += ep['F_grav'][li*2+1]
                     
                 # DEBUG: Check if gravity is non-zero
                 if np.linalg.norm(ep['F_grav']) < 1e-9:
@@ -723,7 +851,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 # Deactivated -> Subtract its gravity (it's gone)
                 for li in range(6):
                     gi = ep['nodes'][li]
-                    delta_F_external[gi*2:gi*2+2] -= ep['F_grav'][li*2:li*2+2]
+                    delta_F_external[gi*3] -= ep['F_grav'][li*2]
+                    delta_F_external[gi*3+1] -= ep['F_grav'][li*2+1]
             elif is_active_now and was_active_before:
                  # Debug: Check for "Silent Skip" (Parent thought active, but no stress)
                  # Only if gravity is significant (non-zero density)
@@ -748,7 +877,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 # Newly activated beam -> Add weight
                 for li in range(2):
                     gi = bp['nodes'][li]
-                    delta_F_external[gi*2:gi*2+2] += bp['F_grav'][li*2:li*2+2]
+                    delta_F_external[gi*3] += bp['F_grav'][li*3]
+                    delta_F_external[gi*3+1] += bp['F_grav'][li*3+1]
+                    delta_F_external[gi*3+2] += bp['F_grav'][li*3+2]
 
         # B. Stress Release from Deactivated Elements (Excavation)
         for ep in elem_props_all:
@@ -773,7 +904,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     gi = ep['nodes'][li]
                     # We ADD the release force because the boundary is now MISSING 
                     # the support from this element.
-                    delta_F_external[gi*2:gi*2+2] += f_int_el[li*2:li*2+2]
+                    delta_F_external[gi*3] += f_int_el[li*2]
+                    delta_F_external[gi*3+1] += f_int_el[li*2+1]
         
         # C. Point/Line Load Changes
         current_load_vectors = np.zeros(num_dof)
@@ -797,8 +929,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 if lid in pl_map and lid in pl_assignment_map:
                     pl = pl_map[lid]
                     n_idx = pl_assignment_map[lid]
-                    target_vector[n_idx*2] += pl.fx
-                    target_vector[n_idx*2+1] += pl.fy
+                    target_vector[n_idx*3] += pl.fx
+                    target_vector[n_idx*3+1] += pl.fy
                 
                 # Apply Line Loads
                 if lid in ll_map and lid in ll_assignment_map:
@@ -810,9 +942,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         L = np.linalg.norm(p2 - p1)
                         # Quadratic edge distribution (parabolic): 1/6, 1/6, 2/3
                         f_total = np.array([ll.fx, ll.fy]) * L
-                        target_vector[n1*2 : n1*2+2] += f_total / 6.0
-                        target_vector[n2*2 : n2*2+2] += f_total / 6.0
-                        target_vector[n3*2 : n3*2+2] += f_total * (2.0/3.0)
+                        target_vector[n1*3] += f_total[0] / 6.0
+                        target_vector[n1*3+1] += f_total[1] / 6.0
+                        target_vector[n2*3] += f_total[0] / 6.0
+                        target_vector[n2*3+1] += f_total[1] / 6.0
+                        target_vector[n3*3] += f_total[0] * (2.0/3.0)
+                        target_vector[n3*3+1] += f_total[1] * (2.0/3.0)
 
         # Calculate current and parent states
         apply_all_loads(phase.active_load_ids, current_load_vectors)
@@ -823,6 +958,56 @@ def solve_phases(request: SolverRequest, should_stop=None):
         
         # D. Incremental Gravity from Material Changes (unit weight difference)
         delta_F_external += delta_F_grav_material
+        
+        # D.1 Pseudo-static Force Adjustment (Handling changes in kh/kv for already active elements)
+        kh_curr = getattr(phase, "kh", 0.0)
+        kv_curr = getattr(phase, "kv", 0.0)
+        kh_prev = getattr(parent_phase, "kh", 0.0) if parent_phase else 0.0
+        kv_prev = getattr(parent_phase, "kv", 0.0) if parent_phase else 0.0
+        
+        if (abs(kh_curr - kh_prev) > 1e-9 or abs(kv_curr - kv_prev) > 1e-9):
+            msg_ps = f"Applying pseudo-static increment: kh({kh_prev}->{kh_curr}), kv({kv_prev}->{kv_curr})"
+            log.append(msg_ps); yield {"type": "log", "content": msg_ps}
+            
+            # Update gravity for all elements to match current phase coeffs
+            for ep in elem_props_all:
+                poly_id = ep['polygon_id']
+                # If it was already active, we must apply the LOAD DIFFERENCE.
+                # If it's newly active, its ep['F_grav'] is already correct from rebuild OR 
+                # we need to ensure it uses current kh/kv.
+                
+                # Re-calculate current target F_grav
+                coords = np.array([nodes[n] for n in ep['nodes']])
+                _, F_grav_curr, _, _ = compute_element_matrices_t6(
+                    coords, ep['material'], water_level=current_water_level_data,
+                    kh=kh_curr, kv=kv_curr
+                )
+                
+                if poly_id in parent_active_indices and poly_id in current_active_indices:
+                    # Remaining active -> Apply increment
+                    for li in range(6):
+                        gi = ep['nodes'][li]
+                        delta_F_external[gi*3] += (F_grav_curr[li*2] - ep['F_grav'][li*2])
+                        delta_F_external[gi*3+1] += (F_grav_curr[li*2+1] - ep['F_grav'][li*2+1])
+                
+                # Update ep['F_grav'] to the new values for future phases
+                ep['F_grav'] = F_grav_curr
+
+            # Beam adjustment
+            for bp in beam_props_all:
+                beam_id = bp['beam_id']
+                _, F_grav_b_curr = compute_beam_element_matrix(
+                    bp['coords'], bp['material'].youngsModulus, bp['material'].crossSectionArea, 
+                    getattr(bp['material'], 'momentOfInertia', 1e-6),
+                    bp['spacing'], bp['material'].unitWeight, kh=kh_curr, kv=kv_curr
+                )
+                if beam_id in parent_active_beam_ids and beam_id in current_active_beam_ids:
+                    for li in range(2):
+                        gi = bp['nodes'][li]
+                        delta_F_external[gi*3] += (F_grav_b_curr[li*3] - bp['F_grav'][li*3])
+                        delta_F_external[gi*3+1] += (F_grav_b_curr[li*3+1] - bp['F_grav'][li*3+1])
+                        delta_F_external[gi*3+2] += (F_grav_b_curr[li*3+2] - bp['F_grav'][li*3+2])
+                bp['F_grav'] = F_grav_b_curr
         
         # 5. Out-of-Balance Forces (Internal Stress vs External Load) - Initial F_int
         F_int_initial = np.zeros(num_dof)
@@ -841,29 +1026,44 @@ def solve_phases(request: SolverRequest, should_stop=None):
             
             for li in range(6):
                 gi = ep['nodes'][li]
-                F_int_initial[gi*2:gi*2+2] += f_int_el[li*2:li*2+2]
+                F_int_initial[gi*3] += f_int_el[li*2]
+                F_int_initial[gi*3+1] += f_int_el[li*2+1]
         
-        # Add Beam Internal Forces (with yielding check)
+        # Add Beam internal forces to F_int_initial based on parent state
+        # This prevents "ghost" jumps when starting a new phase with already stressed beams
+        is_srm = (phase.phase_type == PhaseType.SAFETY_ANALYSIS)
         for bp in active_beam_props:
-            # Extract u for this beam
-            u_el_b = np.zeros(4)
+            u_el_b = np.zeros(6)
             for li in range(2):
                 gi = bp['nodes'][li]
-                u_el_b[li*2] = total_displacement[gi*2]
-                u_el_b[li*2+1] = total_displacement[gi*2+1]
-                
-            mat_b = bp['material']
-            # Initial state matches parent (plastic/elastic), so is_srm=False for F_int_initial
-            f_int_b, _ = compute_beam_internal_force_yield(
-                bp['coords'], u_el_b, 
-                mat_b.youngsModulus, mat_b.crossSectionArea, 
-                bp['spacing'], bp['capacity'],
-                False, 1.0
-            )
+                u_el_b[li*3] = total_displacement[gi*3]
+                u_el_b[li*3+1] = total_displacement[gi*3+1]
+                u_el_b[li*3+2] = total_displacement[gi*3+2]
             
+            mat_b = bp['material']
+            beam_was_active = (bp['beam_id'] in parent_active_beam_ids)
+            # If beam was active in parent, its gravity is already in Dead Load, so it must be in F_int_initial
+            # If Ph 2 (activation) finished at m=1.0, and Ph 3 starts at m=0.0, we use 1.0 here 
+            # to match the parent's final state internal force.
+            m_init = 1.0 if beam_was_active else 0.0
+            
+            u_ref_b = beam_u_ref_map.get(bp['id'], np.zeros(6))
+            
+            f_int_b_start, _ = compute_beam_internal_force_yield(
+                bp['coords'], u_el_b, u_ref_b,
+                mat_b.youngsModulus, mat_b.crossSectionArea,
+                getattr(mat_b, 'momentOfInertia', 1e-6),
+                bp['spacing'], bp['capacity'],
+                is_srm, m_init
+            )
             for li in range(2):
                 gi = bp['nodes'][li]
-                F_int_initial[gi*2:gi*2+2] += f_int_b[li*2:li*2+2]
+                F_int_initial[gi*3] += f_int_b_start[li*3]
+                F_int_initial[gi*3+1] += f_int_b_start[li*3+1]
+                F_int_initial[gi*3+2] += f_int_b_start[li*3+2]
+                
+                # Stabilization Reaction: Matches the 1.0 penalty in stiffness
+                F_int_initial[gi*3+2] += 1.0 * total_displacement[gi*3+2]
         
         # Notify UI that a new phase is starting
         is_srm = (phase.phase_type == PhaseType.SAFETY_ANALYSIS)
@@ -1103,7 +1303,23 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         _beam_k_vals = []
                         for bp in active_beam_props:
                             _beam_k_vals.extend(bp['K'].flatten())
-                        _K_values = np.concatenate((_K_values, np.array(_beam_k_vals)))
+                        _K_values = np.concatenate((_K_values, np.array(_beam_k_vals, dtype=np.float64)))
+                    
+                    # Standard Stabilization (Global)
+                    _stab_vals = np.full(num_nodes * 3, 1e-9, dtype=np.float64)
+                    
+                    # ENHANCED STABILIZATION for EBR Nodes (prevent rotation jitter)
+                    # EBR nodes only have rotational stiffness from the beam itself.
+                    # Soil (T6) has 0 rotational stiffness, which can lead to poorly conditioned 
+                    # beam rotations in slanted configurations.
+                    for bid in active_beam_ids_set:
+                        assign = beam_assign_map.get(bid)
+                        if assign:
+                            for nid in assign.nodes:
+                                _stab_vals[(nid-1)*3 + 2] = 1.0
+
+                    _K_values = np.concatenate((_K_values, _stab_vals))
+                    
                     _K_global = sp.coo_matrix((_K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
                     return _K_global[free_dofs, :][:, free_dofs]
                 
@@ -1123,22 +1339,29 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 def _compute_beam_forces(total_u_cand, tgt_m):
                     F_int_b = np.zeros(num_dof)
                     for bp in active_beam_props:
-                        u_el_b = np.zeros(4)
+                        u_el_b = np.zeros(6)
                         for li in range(2):
                             gi = bp['nodes'][li]
-                            u_el_b[li*2] = total_u_cand[gi*2]
-                            u_el_b[li*2+1] = total_u_cand[gi*2+1]
+                            u_el_b[li*3] = total_u_cand[gi*3]
+                            u_el_b[li*3+1] = total_u_cand[gi*3+1]
+                            u_el_b[li*3+2] = total_u_cand[gi*3+2]
                         mat_b = bp['material']
-                        f_int_b_seg, _ = compute_beam_internal_force_yield(
-                            bp['coords'], u_el_b,
+                        u_ref_b = beam_u_ref_map.get(bp['id'], np.zeros(6))
+                        f_int_b, _ = compute_beam_internal_force_yield(
+                            bp['coords'], u_el_b, u_ref_b,
                             mat_b.youngsModulus, mat_b.crossSectionArea,
+                            getattr(mat_b, 'momentOfInertia', 1e-6),
                             bp['spacing'], bp['capacity'],
                             is_srm, tgt_m
                         )
                         for li in range(2):
                             gi = bp['nodes'][li]
-                            F_int_b[gi*2] += f_int_b_seg[li*2]
-                            F_int_b[gi*2+1] += f_int_b_seg[li*2+1]
+                            F_int_b[gi*3] += f_int_b[li*3]
+                            F_int_b[gi*3+1] += f_int_b[li*3+1]
+                            F_int_b[gi*3+2] += f_int_b[li*3+2]
+                            
+                            # Stabilization Reaction: Matches the 1.0 penalty in stiffness
+                            F_int_b[gi*3+2] += 1.0 * total_u_cand[gi*3+2]
                     return F_int_b
                 
                 # Compute initial arc-length radius on first step
@@ -1268,24 +1491,31 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     
                     # Add Beam Internal Forces to F_int (with yielding)
                     for bp in active_beam_props:
-                        u_el_b = np.zeros(4)
+                        u_el_b = np.zeros(6)
                         for li in range(2):
                             gi = bp['nodes'][li]
-                            u_el_b[li*2] = total_u_candidate[gi*2]
-                            u_el_b[li*2+1] = total_u_candidate[gi*2+1]
+                            u_el_b[li*3] = total_u_candidate[gi*3]
+                            u_el_b[li*3+1] = total_u_candidate[gi*3+1]
+                            u_el_b[li*3+2] = total_u_candidate[gi*3+2]
                         
                         mat_b = bp['material']
+                        u_ref_b = beam_u_ref_map.get(bp['id'], np.zeros(6))
                         f_int_b, is_yielded_b = compute_beam_internal_force_yield(
-                            bp['coords'], u_el_b, 
+                            bp['coords'], u_el_b, u_ref_b,
                             mat_b.youngsModulus, mat_b.crossSectionArea, 
+                            getattr(mat_b, 'momentOfInertia', 1e-6),
                             bp['spacing'], bp['capacity'],
                             is_srm, target_m_stage
                         )
                         
                         for li in range(2):
                             gi = bp['nodes'][li]
-                            F_int[gi*2] += f_int_b[li*2]
-                            F_int[gi*2+1] += f_int_b[li*2+1]
+                            F_int[gi*3] += f_int_b[li*3]
+                            F_int[gi*3+1] += f_int_b[li*3+1]
+                            F_int[gi*3+2] += f_int_b[li*3+2]
+                            
+                            # Stabilization Reaction: Matches the 1.0 penalty and prevents drift
+                            F_int[gi*3+2] += 1.0 * total_u_candidate[gi*3+2]
 
                     
                     # Global Residual
@@ -1314,7 +1544,19 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         beam_k_vals = []
                         for bp in active_beam_props:
                             beam_k_vals.extend(bp['K'].flatten())
-                        K_values = np.concatenate((K_values, np.array(beam_k_vals)))
+                        K_values = np.concatenate((K_values, np.array(beam_k_vals, dtype=np.float64)))
+                    
+                    # Standard Stabilization (Global)
+                    _stab_vals = np.full(num_nodes * 3, 1e-9, dtype=np.float64)
+                    
+                    # ENHANCED STABILIZATION for EBR Nodes (prevent rotation jitter)
+                    for bid in active_beam_ids_set:
+                        assign = beam_assign_map.get(bid)
+                        if assign:
+                            for nid in assign.nodes:
+                                _stab_vals[(nid-1)*3 + 2] = 1.0
+
+                    K_values = np.concatenate((K_values, _stab_vals))
                     
                     K_global = sp.coo_matrix((K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
                     K_free = K_global[free_dofs, :][:, free_dofs]
@@ -1374,8 +1616,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
                                         diagnostic_msgs.append(f"... and {len(bad_dofs_global) - limit_reports} more.")
                                         break
                                     
-                                    node_id = bad_dof // 2
-                                    axis = "X" if bad_dof % 2 == 0 else "Y"
+                                    node_id = bad_dof // 3
+                                    axis_id = bad_dof % 3
+                                    axis = "X" if axis_id == 0 else ("Y" if axis_id == 1 else "Rotation")
                                     diagnostic_msgs.append(f"Node {node_id + 1} (DOF {axis}) has near-zero stiffness.")
                                 
                                 diag_msg = "Weak/Disconnect Nodes: " + "; ".join(diagnostic_msgs)
@@ -1404,7 +1647,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             
             # Calculate displacement magnitudes for this step attempt (whether converged or not)
             trial_u = current_u_incremental + step_du
-            trial_u_reshaped = trial_u.reshape(-1, 2)
+            trial_u_reshaped = trial_u.reshape(-1, 3)
             trial_magnitudes = np.sqrt(trial_u_reshaped[:,0]**2 + trial_u_reshaped[:,1]**2)
             max_disp = np.float64(np.max(trial_magnitudes))
 
@@ -1460,7 +1703,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     entry = {"step": step_count, "m_stage": float(current_m_stage)}
                     if tp.type == "node":
                         n_idx = tp.index
-                        dof_x, dof_y = n_idx * 2, n_idx * 2 + 1
+                        dof_x, dof_y = n_idx * 3, n_idx * 3 + 1
                         if n_idx < len(nodes):
                             entry["ux"] = float(trial_u[dof_x])
                             entry["uy"] = float(trial_u[dof_y])
@@ -1482,9 +1725,15 @@ def solve_phases(request: SolverRequest, should_stop=None):
                             entry["sig_yy"] = float(sig[1])
                             entry["sig_xy"] = float(sig[2])
                             entry["sig_zz"] = float(sig[3]) if len(sig) > 3 else float(0.3 * (sig[0] + sig[1]))
-                            # PWP approximation (assume element uniform if not arrayed by GP, but here we just use scalar if array)
+                            # PWP approximation
                             px = pexc[gp_idx] if pexc and hasattr(pexc, '__len__') and gp_idx < len(pexc) else 0.0
                             entry["pwp_excess"] = float(px)
+                            
+                            # Steady PWP from initial state
+                            ep = active_elem_props[e_idx]
+                            p_steady = ep['gauss_points'][gp_idx]['pwp'] or 0.0
+                            entry["pwp_steady"] = float(p_steady)
+                            entry["pwp_total"] = float(px + p_steady)
                             
                         # Strain
                         sr = temp_phase_strain.get(e_idx + 1)
@@ -1536,8 +1785,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 worst_idx = np.argmax(abs_R)
                 worst_val = abs_R[worst_idx]
                 global_dof = free_dofs[worst_idx]
-                node_id = (global_dof // 2) + 1
-                axis = "X" if global_dof % 2 == 0 else "Y"
+                node_id = (global_dof // 3) + 1
+                axis_id = global_dof % 3
+                axis = "X" if axis_id == 0 else ("Y" if axis_id == 1 else "Rotation")
                 
                 msg_detail = f"  > Final Residual Norm: {norm_R:.4f} | Max Displacement: {max_disp:.6f} m | (Rel: {norm_R/f_base:.6f} vs Tol: {settings.tolerance})"
                 msg_worst = f"  > Largest Out-of-balance: {worst_val:.4f} kN at Node {node_id} (DOF {axis})"
@@ -1582,7 +1832,100 @@ def solve_phases(request: SolverRequest, should_stop=None):
         final_u_total = total_displacement + current_u_incremental
         p_displacements = []
         for i in range(num_nodes):
-            p_displacements.append(NodeResult(id=i+1, ux=final_u_total[i*2], uy=final_u_total[i*2+1]))
+            p_displacements.append(NodeResult(
+                id=i+1, 
+                ux=final_u_total[i*3], 
+                uy=final_u_total[i*3+1], 
+                rot=final_u_total[i*3+2]
+            ))
+        
+        # Post-Process Beam Forces
+        p_beam_results = []
+        for bp in active_beam_props:
+            bm = bp['material']
+            u_el_b = np.zeros(6)
+            for li in range(2):
+                gi = bp['nodes'][li]
+                u_el_b[li*3] = final_u_total[gi*3]
+                u_el_b[li*3+1] = final_u_total[gi*3+1]
+                u_el_b[li*3+2] = final_u_total[gi*3+2]
+            
+            u_ref_b = beam_u_ref_map.get(bp['id'], np.zeros(6))
+            forces = compute_beam_forces_local(
+                bp['coords'], u_el_b, u_ref_b,
+                bm.youngsModulus, bm.crossSectionArea, 
+                getattr(bm, 'momentOfInertia', 1e-6),
+                bp['spacing']
+            )
+            # forces: [N, V1, M1, V2, M2]
+            # relative displacements
+            u_rel = u_el_b - u_ref_b
+            
+            p_beam_results.append(BeamResult(
+                beam_id=bp['beam_id'],
+                segment_index=int(bp['id'].split("_seg_")[-1]),
+                n=float(forces[0]),
+                v1=float(forces[1]),
+                m1=float(forces[2]),
+                v2=float(forces[3]),
+                m2=float(forces[4]),
+                # Total displacements
+                ux1=float(u_el_b[0]), uy1=float(u_el_b[1]),
+                ux2=float(u_el_b[3]), uy2=float(u_el_b[4]),
+                # Relative displacements
+                urx1=float(u_rel[0]), ury1=float(u_rel[1]),
+                urx2=float(u_rel[3]), ury2=float(u_rel[4])
+            ))
+
+        # --- DIAGNOSTIC: Check beam continuity at shared nodes ---
+        if p_beam_results:
+            # Group by beam_id
+            from collections import defaultdict
+            beam_groups = defaultdict(list)
+            for res in p_beam_results:
+                beam_groups[res.beam_id].append(res)
+            
+            for bid, segments in beam_groups.items():
+                segments.sort(key=lambda x: x.segment_index)
+                for i in range(len(segments) - 1):
+                    s1 = segments[i]
+                    s2 = segments[i+1]
+                    diff_m = abs(s1.m2 - s2.m1)
+                    diff_v = abs(s1.v2 - s2.v1)
+                    
+                    if diff_m > 1e-2 or diff_v > 1e-2:
+                        msg_disco = f"  [DIAGNOSTIC] EBR '{bid}' Discontinuity at Seg {i}-{i+1}: dM={diff_m:.4f}, dV={diff_v:.4f}"
+                        print(msg_disco)
+                        log.append(msg_disco)
+                        
+                        # DEEP DIAGNOSTIC for slanted beams
+                        # Grab original element props for these segments to see their forces
+                        bp1 = next((p for p in beam_props_all if p['id'] == f"{bid}_seg_{i}"), None)
+                        bp2 = next((p for p in beam_props_all if p['id'] == f"{bid}_seg_{i+1}"), None)
+                        
+                        if bp1 and bp2:
+                            def get_forces_for_bp(bp):
+                                u_el_b = np.zeros(6)
+                                for li in range(2):
+                                    gi = bp['nodes'][li]
+                                    u_el_b[li*3] = final_u_total[gi*3]
+                                    u_el_b[li*3+1] = final_u_total[gi*3+1]
+                                    u_el_b[li*3+2] = final_u_total[gi*3+2]
+                                    
+                                u_ref_b = beam_u_ref_map.get(bp['id'], np.zeros(6))
+                                return compute_beam_forces_local(
+                                    bp['coords'], u_el_b, u_ref_b,
+                                    bp['material'].youngsModulus, bp['material'].crossSectionArea, 
+                                    getattr(bp['material'], 'momentOfInertia', 1e-6),
+                                    bp['spacing']
+                                )
+                            
+                            f1 = get_forces_for_bp(bp1)
+                            f2 = get_forces_for_bp(bp2)
+                            print(f"    - Seg {i}   Ends: M2={f1[4]:.4f}, V2={f1[3]:.4f}")
+                            print(f"    - Seg {i+1} Starts: M1={f2[2]:.4f}, V1={f2[1]:.4f}")
+                            print(f"    - Seg {i}   f_loc: {f1}")
+                            print(f"    - Seg {i+1} f_loc: {f2}")
         
         p_stresses = []
         for ep in active_elem_props:
@@ -1636,6 +1979,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             'success': success,
             'displacements': p_displacements,
             'stresses': p_stresses,
+            'beam_results': p_beam_results,
             'pwp': [], # Skipped for now
             'reached_m_stage': current_m_stage,
             'step_points': phase_step_points,
@@ -1662,6 +2006,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             # Save state snapshot for this phase so child phases can branch from it
             phase_snapshots[phase.id] = {
                 'total_displacement': total_displacement.copy(),
+                'beam_u_ref': copy.deepcopy(beam_u_ref_map),
                 'element_stress_state': copy.deepcopy(element_stress_state),
                 'element_strain_state': copy.deepcopy(element_strain_state),
                 'element_yield_state': copy.deepcopy(element_yield_state),
@@ -1673,6 +2018,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             }
         else:
             log.append(f"Phase {phase.name} failed at step {step_count}.")
+            failed_phases.add(phase.id)
             # Don't break — other branches may still succeed
         
         # Log Phase Duration

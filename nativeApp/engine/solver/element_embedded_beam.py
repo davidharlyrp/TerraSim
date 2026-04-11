@@ -1,20 +1,17 @@
+# engine/solver/element_embedded_beam.py
+# ===========================================================================
+# Embedded Beam Element Logic (3rd DOF Frame Formulation)
+# ===========================================================================
 
 import numpy as np
 from numba import njit
 
 @njit
-def compute_beam_element_matrix(node_coords, E, A, spacing, unit_weight=0.0):
+def compute_beam_element_matrix(node_coords, E, A, I, spacing, unit_weight=0.0, kh=0.0, kv=0.0):
     """
-    Computes the 4x4 stiffness matrix for a 2D Truss element (Axial only).
-    node_coords: (2, 2) array [[x1, y1], [x2, y2]]
-    E: Young's Modulus
-    A: Cross-sectional Area
-    spacing: Out-of-plane spacing
-    
-    Returns: K_global (4x4)
-    DOFs: u1, v1, u2, v2
+    Computes the 6x6 stiffness matrix for a 2D Bernoulli beam element.
+    Returns: K_global (6x6), F_grav (6,)
     """
-    
     x1, y1 = node_coords[0, 0], node_coords[0, 1]
     x2, y2 = node_coords[1, 0], node_coords[1, 1]
     
@@ -23,47 +20,61 @@ def compute_beam_element_matrix(node_coords, E, A, spacing, unit_weight=0.0):
     L = np.sqrt(dx*dx + dy*dy)
     
     if L < 1e-9:
-        return np.zeros((4, 4)), np.zeros(4)
+        return np.zeros((6, 6)), np.zeros(6)
         
     c = dx / L
     s = dy / L
     
-    # Stiffness E*A / L
-    # Adjusted for spacing (per meter width)
     inv_spacing = 1.0 / spacing if spacing > 1e-9 else 1.0
-    k = (E * A / L) * inv_spacing
     
-    # Local matrix in global coordinates:
-    # [ c^2   cs    -c^2  -cs ]
-    # [ cs    s^2   -cs   -s^2]
-    # [ -c^2  -cs   c^2   cs  ]
-    # [ -cs   -s^2  cs    s^2 ]
+    k_axial = (E * A / L) * inv_spacing
+    k_bend = (E * I / (L**3)) * inv_spacing
     
-    cc = c*c
-    ss = s*s
-    cs = c*s
+    # Local stiffness matrix (6x6)
+    k_local = np.zeros((6, 6))
+    k_local[0, 0] = k_axial;  k_local[0, 3] = -k_axial
+    k_local[3, 0] = -k_axial; k_local[3, 3] = k_axial
     
-    K = np.zeros((4, 4))
-    K[0,0] = cc*k; K[0,1] = cs*k; K[0,2] = -cc*k; K[0,3] = -cs*k
-    K[1,0] = cs*k; K[1,1] = ss*k; K[1,2] = -cs*k; K[1,3] = -ss*k
-    K[2,0] = -cc*k; K[2,1] = -cs*k; K[2,2] = cc*k; K[2,3] = cs*k
-    K[3,0] = -cs*k; K[3,1] = -ss*k; K[3,2] = cs*k; K[3,3] = ss*k
+    # Bending components
+    k_local[1, 1] = 12.0 * k_bend; k_local[1, 2] = 6.0 * k_bend * L
+    k_local[1, 4] = -12.0 * k_bend; k_local[1, 5] = 6.0 * k_bend * L
     
-    # Gravity Force (F_y = -w * L / 2 / spacing)
-    # Total weight of segment = (unit_weight * L) / spacing
-    # Distributed equally to both nodes
+    k_local[2, 1] = 6.0 * k_bend * L; k_local[2, 2] = 4.0 * k_bend * L * L
+    k_local[2, 4] = -6.0 * k_bend * L; k_local[2, 5] = 2.0 * k_bend * L * L
+    
+    k_local[4, 1] = -12.0 * k_bend; k_local[4, 2] = -6.0 * k_bend * L
+    k_local[4, 4] = 12.0 * k_bend; k_local[4, 5] = -6.0 * k_bend * L
+    
+    k_local[5, 1] = 6.0 * k_bend * L; k_local[5, 2] = 2.0 * k_bend * L * L
+    k_local[5, 4] = -6.0 * k_bend * L; k_local[5, 5] = 4.0 * k_bend * L * L
+    
+    # Transformation matrix T (6x6)
+    T = np.zeros((6, 6))
+    T[0, 0] = c;  T[0, 1] = s
+    T[1, 0] = -s; T[1, 1] = c
+    T[2, 2] = 1.0
+    T[3, 3] = c;  T[3, 4] = s
+    T[4, 3] = -s; T[4, 4] = c
+    T[5, 5] = 1.0
+    
+    # K_global = T.T @ k_local @ T
+    K_global = T.T @ k_local @ T
+    
+    # Gravity Force
     total_w = (unit_weight * L) * inv_spacing
-    F_grav = np.array([0.0, -total_w/2.0, 0.0, -total_w/2.0])
+    Fx = kh * total_w / 2.0
+    Fy = -(1.0 + kv) * total_w / 2.0
+    
+    F_grav = np.zeros(6)
+    F_grav[0] = Fx; F_grav[1] = Fy
+    F_grav[3] = Fx; F_grav[4] = Fy
 
-    return K, F_grav
+    return K_global, F_grav
 
 @njit
-def compute_beam_internal_force_yield(node_coords, u_el, E, A, spacing, capacity, is_srm, target_m_stage):
+def compute_beam_internal_force_yield(node_coords, u_el, u_ref, E, A, I, spacing, capacity, is_srm, target_m_stage):
     """
-    Computes internal force vector for a beam element with axial yielding.
-    u_el: (4,) array [u1, v1, u2, v2]
-    capacity: Maximum axial force (Tension/Compression)
-    is_srm: If True, capacity is reduced by target_m_stage
+    Computes internal force vector for a 6-DOF beam element with axial yielding.
     """
     x1, y1 = node_coords[0, 0], node_coords[0, 1]
     x2, y2 = node_coords[1, 0], node_coords[1, 1]
@@ -71,48 +82,118 @@ def compute_beam_internal_force_yield(node_coords, u_el, E, A, spacing, capacity
     dx = x2 - x1
     dy = y2 - y1
     L = np.sqrt(dx*dx + dy*dy)
-    if L < 1e-9: return np.zeros(4), False
+    if L < 1e-9: return np.zeros(6), False
 
     c = dx / L
     s = dy / L
     
-    # Local displacements (axial only)
-    # u_local = u*c + v*s
-    u1_local = u_el[0]*c + u_el[1]*s
-    u2_local = u_el[2]*c + u_el[3]*s
-    du_local = u2_local - u1_local
+    # Transformation matrix T (6x6)
+    T = np.zeros((6, 6))
+    T[0, 0] = c;  T[0, 1] = s
+    T[1, 0] = -s; T[1, 1] = c
+    T[2, 2] = 1.0
+    T[3, 3] = c;  T[3, 4] = s
+    T[4, 3] = -s; T[4, 4] = c
+    T[5, 5] = 1.0
     
-    # Trial axial force (kN)
-    # Stiffness already accounts for spacing
+    u_local = T @ (u_el - u_ref)
+    
     inv_spacing = 1.0 / spacing if spacing > 1e-9 else 1.0
     k_axial = (E * A / L) * inv_spacing
+    k_bend = (E * I / (L**3)) * inv_spacing
     
-    f_axial_trial = k_axial * du_local
+    # k_local construction
+    k_local = np.zeros((6, 6))
+    k_local[0, 0] = k_axial;  k_local[0, 3] = -k_axial
+    k_local[3, 0] = -k_axial; k_local[3, 3] = k_axial
     
-    # Yielding check
-    eff_capacity = capacity
+    k_local[1, 1] = 12.0 * k_bend; k_local[1, 2] = 6.0 * k_bend * L
+    k_local[1, 4] = -12.0 * k_bend; k_local[1, 5] = 6.0 * k_bend * L
+    k_local[2, 1] = 6.0 * k_bend * L; k_local[2, 2] = 4.0 * k_bend * L * L
+    k_local[2, 4] = -6.0 * k_bend * L; k_local[2, 5] = 2.0 * k_bend * L * L
+    k_local[4, 1] = -12.0 * k_bend; k_local[4, 2] = -6.0 * k_bend * L
+    k_local[4, 4] = 12.0 * k_bend; k_local[4, 5] = -6.0 * k_bend * L
+    k_local[5, 1] = 6.0 * k_bend * L; k_local[5, 2] = 2.0 * k_bend * L * L
+    k_local[5, 4] = -6.0 * k_bend * L; k_local[5, 5] = 4.0 * k_bend * L * L
+    
+    f_local_trial = k_local @ u_local
+    
+    eff_capacity = capacity * inv_spacing
     if is_srm and target_m_stage > 0:
         eff_capacity /= target_m_stage
         
-    f_axial = f_axial_trial
+    f_axial = f_local_trial[3] 
     is_yielded = False
-    if np.abs(f_axial_trial) > eff_capacity:
-        f_axial = np.sign(f_axial_trial) * eff_capacity
-        is_yielded = True
-        
-    # Convert back to global forces
-    # Node 1: -f_axial in local direction
-    # Node 2: f_axial in local direction
-    f_int = np.zeros(4)
-    f_int[0] = -f_axial * c
-    f_int[1] = -f_axial * s
-    f_int[2] = f_axial * c
-    f_int[3] = f_axial * s
+    if capacity > 0:
+        if f_axial > eff_capacity:
+            f_axial = eff_capacity
+            is_yielded = True
+        elif f_axial < -eff_capacity:
+            f_axial = -eff_capacity
+            is_yielded = True
+            
+    f_local = f_local_trial.copy()
+    f_local[3] = f_axial
+    f_local[0] = -f_axial
     
-    return f_int, is_yielded
+    f_global = T.T @ f_local
+    return f_global, is_yielded
 
 @njit
-def compute_beam_stiffness_only(node_coords, E, A, spacing):
-    """Legacy helper for backward compatibility or when gravity isn't needed."""
-    K, _ = compute_beam_element_matrix(node_coords, E, A, spacing)
+def compute_beam_forces_local(node_coords, u_el, u_ref, E, A, I, spacing):
+    """
+    Computes local internal forces [N, V1, M1, V2, M2]
+    """
+    x1, y1 = node_coords[0, 0], node_coords[0, 1]
+    x2, y2 = node_coords[1, 0], node_coords[1, 1]
+    
+    dx = x2 - x1
+    dy = y2 - y1
+    L = np.sqrt(dx*dx + dy*dy)
+    if L < 1e-9: return np.zeros(5)
+
+    c = dx / L
+    s = dy / L
+    
+    # Transformation matrix T (6x6)
+    T = np.zeros((6, 6))
+    T[0, 0] = c;  T[0, 1] = s
+    T[1, 0] = -s; T[1, 1] = c
+    T[2, 2] = 1.0
+    T[3, 3] = c;  T[3, 4] = s
+    T[4, 3] = -s; T[4, 4] = c
+    T[5, 5] = 1.0
+    
+    u_local = T @ (u_el - u_ref)
+    
+    inv_spacing = 1.0 / spacing if spacing > 1e-9 else 1.0
+    k_axial = (E * A / L) * inv_spacing
+    k_bend = (E * I / (L**3)) * inv_spacing
+    
+    k_local = np.zeros((6, 6))
+    k_local[0, 0] = k_axial;  k_local[0, 3] = -k_axial
+    k_local[3, 0] = -k_axial; k_local[3, 3] = k_axial
+    k_local[1, 1] = 12.0 * k_bend; k_local[1, 2] = 6.0 * k_bend * L
+    k_local[1, 4] = -12.0 * k_bend; k_local[1, 5] = 6.0 * k_bend * L
+    k_local[2, 1] = 6.0 * k_bend * L; k_local[2, 2] = 4.0 * k_bend * L * L
+    k_local[2, 4] = -6.0 * k_bend * L; k_local[2, 5] = 2.0 * k_bend * L * L
+    k_local[4, 1] = -12.0 * k_bend; k_local[4, 2] = -6.0 * k_bend * L
+    k_local[4, 4] = 12.0 * k_bend; k_local[4, 5] = -6.0 * k_bend * L
+    k_local[5, 1] = 6.0 * k_bend * L; k_local[5, 2] = 2.0 * k_bend * L * L
+    k_local[5, 4] = -6.0 * k_bend * L; k_local[5, 5] = 4.0 * k_bend * L * L
+    
+    f_local = k_local @ u_local
+    
+    res = np.zeros(5)
+    res[0] = f_local[3]  # N
+    res[1] = -f_local[1] # V1
+    res[2] = -f_local[2] # M1
+    res[3] = f_local[4]  # V2
+    res[4] = f_local[5]  # M2
+    return res
+
+@njit
+def compute_beam_stiffness_only(node_coords, E, A, I, spacing):
+    """Calculates stiffness matrix only, mostly for diagnostic use."""
+    K, _ = compute_beam_element_matrix(node_coords, E, A, I, spacing)
     return K

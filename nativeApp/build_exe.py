@@ -3,13 +3,22 @@ import PyInstaller.__main__
 import os
 import sys
 
-# Get absolute path to assets
+# Paths and Assets
 current_dir = os.path.dirname(os.path.abspath(__file__))
 assets_path = os.path.join(current_dir, 'assets')
 
-print(f"TerraSim Build Script")
-print(f"=====================")
-print(f"Assets path: {assets_path}")
+# Explicitly collect all DLLs from Intel bin folder (Critical for Pardiso/AMD)
+# Our venv is now "Pure" and self-contained with all necessary Intel runtimes.
+mkl_bin_path = os.path.join(current_dir, 'venv', 'Library', 'bin')
+intel_binaries = []
+if os.path.exists(mkl_bin_path):
+    print(f"Collecting MKL and Intel binaries from: {mkl_bin_path}")
+    for f in os.listdir(mkl_bin_path):
+        if f.lower().endswith('.dll'):
+            print(f"  + {f}")
+            intel_binaries.append(f'--add-binary={os.path.join(mkl_bin_path, f)};.')
+else:
+    print("WARNING: Intel binaries NOT found in venv/Library/bin. Pardiso will fail.")
 
 # PyInstaller parameters
 params = [
@@ -18,10 +27,14 @@ params = [
     '--onedir',                     # Package as a directory (faster startup)
     '--noconsole',                  # No command prompt (windowed)
     f'--add-data={assets_path};assets', # Bundle style/icons
+] + intel_binaries + [
     '--icon=' + os.path.join(assets_path, 'Logo.png'), # EXE Icon
     '--clean',                      # Clean cache before build
     
     # Hidden imports often needed for scientific/UI stacks
+    '--hidden-import=pypardiso',
+    '--collect-all=pypardiso',
+    '--collect-submodules=pypardiso',
     '--hidden-import=terrasim_core',
     '--hidden-import=PySide6.QtCore',
     '--hidden-import=PySide6.QtGui',

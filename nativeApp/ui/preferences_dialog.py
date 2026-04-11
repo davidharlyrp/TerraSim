@@ -9,8 +9,12 @@ from core.state import ProjectState
 try:
     from pypardiso import spsolve
     HAS_PARDISO = True
-except ImportError:
+except Exception as e:
     HAS_PARDISO = False
+    # This will print to terminal if running the bundled EXE from cmd/powershell
+    print(f"DEBUG: Pardiso import failed: {e}")
+    import traceback
+    traceback.print_exc()
 
 class PreferencesDialog(QDialog):
     """
@@ -34,10 +38,18 @@ class PreferencesDialog(QDialog):
 
         # Style for secondary labels and compact layout
         self.setStyleSheet("""
-            QGroupBox { font-weight: bold; border: 1px solid #e2e8f0; border-radius: 4px; margin-top: 10px; padding-top: 10px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }
-            QLabel { color: #475569; }
-            QSpinBox, QDoubleSpinBox { padding: 2px; border: 1px solid #cbd5e1; border-radius: 3px; }
+            QGroupBox { font-weight: semibold; border: 1px solid #e5e7eb; border-radius: 0px; margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; color: #6b7280; }
+            QLabel { color: #374151; font-size: 11px; }
+            QSpinBox, QDoubleSpinBox { 
+                padding: 4px 6px; 
+                border: 1px solid #d1d5db; 
+                border-radius: 0px; 
+                background-color: #ffffff;
+                color: #111827;
+                height: 24px;
+            }
+            QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #111827; }
         """)
 
         # --- Numerical Control group ---
@@ -81,7 +93,7 @@ class PreferencesDialog(QDialog):
         self.chk_al.setToolTip("Uses Crisfield's arc-length method (recommended for slope failure/SRM).")
         meth_layout.addWidget(self.chk_al)
 
-        self.chk_pardiso = QCheckBox("Push CPU Performance (Pardiso)")
+        self.chk_pardiso = QCheckBox("Push CPU Performance")
         self.chk_pardiso.setToolTip("Uses Intel MKL Pypardiso for parallel solver execution.")
         
         if not HAS_PARDISO:
@@ -104,11 +116,23 @@ class PreferencesDialog(QDialog):
         
         btn_cancel = QPushButton("Cancel")
         btn_cancel.setFixedWidth(80)
+        btn_cancel.setFixedHeight(30)
+        btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.clicked.connect(self.reject)
         
         btn_save = QPushButton("Apply")
         btn_save.setFixedWidth(100)
-        btn_save.setStyleSheet("background-color: #0f172a; color: white; font-weight: bold;")
+        btn_save.setFixedHeight(30)
+        btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.setStyleSheet("""
+            QPushButton { 
+                background-color: #111827; 
+                color: #ffffff; 
+                font-weight: semibold; 
+                border-radius: 0px; 
+            }
+            QPushButton:hover { background-color: #374151; }
+        """)
         btn_save.clicked.connect(self._on_save_clicked)
 
         footer_layout.addWidget(btn_reset)

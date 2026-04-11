@@ -91,8 +91,8 @@ pub fn compute_stresses_loop_py<'py>(
         let mut u_el = [0.0f64; 12];
         for li in 0..6 {
             let n_idx = elem_nodes[[i, li]] as usize;
-            u_el[li * 2] = u[n_idx * 2];
-            u_el[li * 2 + 1] = u[n_idx * 2 + 1];
+            u_el[li * 2] = u[n_idx * 3];
+            u_el[li * 2 + 1] = u[n_idx * 3 + 1];
         }
 
         let mut f_int_el = [0.0f64; 12];
@@ -313,8 +313,8 @@ pub fn compute_stresses_loop_py<'py>(
         // Scatter to global F_int
         for li in 0..6 {
             let gi = elem_nodes[[i, li]] as usize;
-            f_int[gi * 2] += f_int_el[li * 2];
-            f_int[gi * 2 + 1] += f_int_el[li * 2 + 1];
+            f_int[gi * 3] += f_int_el[li * 2];
+            f_int[gi * 3 + 1] += f_int_el[li * 2 + 1];
         }
     }
 

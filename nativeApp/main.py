@@ -1,6 +1,35 @@
 # main.py
 import sys
 import os
+
+# ===========================================================================
+# DLL SEARCH PATH FIX (FOR FROZEN BUILDS)
+# Required for Python 3.8+ on Windows to find bundled DLLs (MKL/Pardiso)
+# ===========================================================================
+if getattr(sys, 'frozen', False):
+    # Triple-Layer DLL Loader Fix
+    bundle_dir = sys._MEIPASS
+    if os.path.basename(bundle_dir) == "_internal":
+        internal_dir = bundle_dir
+    else:
+        internal_dir = os.path.join(bundle_dir, '_internal')
+    
+    # 1. Standard search path
+    os.add_dll_directory(bundle_dir)
+    if os.path.exists(internal_dir) and internal_dir != bundle_dir:
+        os.add_dll_directory(internal_dir)
+    
+    # 2. Legacy PATH update
+    os.environ['PATH'] = bundle_dir + os.pathsep + internal_dir + os.pathsep + os.environ.get('PATH', '')
+    
+    # 3. AMD Math Hack
+    os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
+    
+    # 4. DIRECT PARDISO FIX
+    mkl_lib_path = os.path.join(internal_dir, 'mkl_rt.2.dll')
+    if os.path.exists(mkl_lib_path):
+        os.environ['PYPARDISO_MKL_RT'] = mkl_lib_path
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from core.licensing import verify_serial

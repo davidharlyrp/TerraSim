@@ -231,6 +231,26 @@ class PropertiesSidebar(QWidget):
         self.beam_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.beam_table.itemChanged.connect(self._on_beam_table_changed)
         self.beam_vbox.addWidget(self.beam_table)
+
+        # Head Definition
+        lbl_head = QLabel("Head Definition")
+        lbl_head.setProperty("class", "SectionTitle")
+        self.beam_vbox.addWidget(lbl_head)
+
+        h_head_layout = QHBoxLayout()
+        self.beam_head_point_cmb = QComboBox()
+        self.beam_head_point_cmb.addItem("Point 1 (Start)", 0)
+        self.beam_head_point_cmb.addItem("Point 2 (End)", 1)
+        self.beam_head_point_cmb.currentIndexChanged.connect(self._on_beam_head_changed)
+        h_head_layout.addWidget(self.beam_head_point_cmb)
+
+        self.beam_head_conn_cmb = QComboBox()
+        self.beam_head_conn_cmb.addItem("Pinned", "PIN")
+        self.beam_head_conn_cmb.addItem("Fixed", "FIXED")
+        self.beam_head_conn_cmb.currentIndexChanged.connect(self._on_beam_head_changed)
+        h_head_layout.addWidget(self.beam_head_conn_cmb)
+
+        self.beam_vbox.addLayout(h_head_layout)
         
         self.content_layout.addWidget(self.beam_group)
 
@@ -479,6 +499,15 @@ class PropertiesSidebar(QWidget):
         self.beam_table.setItem(0, 1, QTableWidgetItem(f"{target['y1']:.3f}"))
         self.beam_table.setItem(1, 0, QTableWidgetItem(f"{target['x2']:.3f}"))
         self.beam_table.setItem(1, 1, QTableWidgetItem(f"{target['y2']:.3f}"))
+
+        # Sync Head Definition
+        h_idx = target.get("head_point_index", 0)
+        h_conn = target.get("head_connection_type", "FIXED")
+        idx_p = self.beam_head_point_cmb.findData(h_idx)
+        if idx_p >= 0: self.beam_head_point_cmb.setCurrentIndex(idx_p)
+        idx_c = self.beam_head_conn_cmb.findData(h_conn)
+        if idx_c >= 0: self.beam_head_conn_cmb.setCurrentIndex(idx_c)
+
         self._is_updating = False
 
     def _on_beam_material_changed(self):
@@ -502,3 +531,13 @@ class PropertiesSidebar(QWidget):
         except: 
             if self._current_selection:
                 self._sync_current_beam(self._current_selection.get("id"))
+
+    def _on_beam_head_changed(self):
+        if self._is_updating or not self._current_selection: return
+        if self._current_selection.get("type") == "embedded_beam":
+            bid = self._current_selection.get("id")
+            data = {
+                "head_point_index": self.beam_head_point_cmb.currentData(),
+                "head_connection_type": self.beam_head_conn_cmb.currentData()
+            }
+            self._state.update_embedded_beam(bid, data)

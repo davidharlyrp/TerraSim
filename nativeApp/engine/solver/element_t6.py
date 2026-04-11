@@ -135,7 +135,9 @@ def compute_element_matrices_t6(
     node_coords: np.ndarray,  # (6, 2) array
     material: Material,
     water_level: Optional[List[Dict]] = None,
-    thickness: float = 1.0
+    thickness: float = 1.0,
+    kh: float = 0.0,
+    kv: float = 0.0
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict], np.ndarray]:
     """
     Compute element stiffness matrix K and gravity load vector F_grav for T6 element.
@@ -222,10 +224,13 @@ def compute_element_matrices_t6(
         K += (B.T @ D @ B) * det_J * weight * thickness
         
         # Add contribution to gravity load vector
-        # F_grav = ∫ N^T * ρ * g dV, where g = [0, -1]
-        # For each node: F_y = -N_i * ρ * det(J) * weight * thickness
+        # F_grav = ∫ N^T * ρ * g_total dV
+        # g_total = [kh*g, -(1+kv)*g]
         for i in range(6):
-            F_grav[2*i+1] += -N[i] * rho_tot * det_J * weight * thickness
+            # Horizontal (x) Load
+            F_grav[2*i] += N[i] * kh * rho_tot * det_J * weight * thickness
+            # Vertical (y) Load
+            F_grav[2*i+1] += -N[i] * (1.0 + kv) * rho_tot * det_J * weight * thickness
     
     return K, F_grav, gauss_point_data, D
 

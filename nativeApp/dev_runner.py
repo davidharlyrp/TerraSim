@@ -13,6 +13,10 @@ class AutoRestartHandler(FileSystemEventHandler):
         self.start_app()
 
     def start_app(self):
+        # Clear terminal for a fresh log view
+        import os
+        os.system('cls' if os.name == 'nt' else 'clear')
+
         # Matikan proses lama jika ada
         if self.process:
             self.process.terminate()

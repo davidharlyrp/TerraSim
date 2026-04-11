@@ -26,6 +26,10 @@ class PhaseItemWidget(QWidget):
         self.levels = levels
         self.is_current = is_current
         self.read_only = read_only
+        
+        from core.state import ProjectState
+        self._state = ProjectState.instance()
+        
         self.setFixedHeight(28)
         self._init_ui()
 
@@ -116,6 +120,12 @@ class PhaseItemWidget(QWidget):
         self.status_icon.setStyleSheet("background: transparent;")
         self.content_layout.addWidget(self.status_icon)
         
+        # MSF Label (Specific for Safety Analysis in Result Tab)
+        self.msf_label = QLabel()
+        self.msf_label.setStyleSheet("font-size: 10px; font-weight: 500; color: #059669; margin-left: 2px; background-color: transparent;") # emerald-600
+        self.msf_label.setVisible(False)
+        self.content_layout.addWidget(self.msf_label)
+        
         self.content_layout.addStretch()
         
         bg_color = "#f1f5f9" if self.is_current else "transparent"
@@ -145,7 +155,7 @@ class PhaseItemWidget(QWidget):
             self.double_clicked.emit(self.index)
 
     def set_status(self, status):
-        """Set the success/fail icon on the far right."""
+        """Set the success/fail icon and update MSF display."""
         import os
         base_path = os.path.dirname(os.path.dirname(__file__))
         
@@ -156,10 +166,26 @@ class PhaseItemWidget(QWidget):
             path = os.path.join(base_path, "assets", "icons", "fail.svg")
             self.status_icon.setPixmap(QPixmap(path))
         elif status == "RUNNING":
-            # Optional: loader or just clear
             self.status_icon.clear()
         else:
             self.status_icon.clear()
+            
+        self.update_msf_display()
+
+    def update_msf_display(self):
+        """Show Safety Factor if in SF Analysis and Result tab."""
+        is_sf = self.phase.get("phase_type") == "SAFETY_ANALYSIS"
+        is_result = getattr(self._state, "active_tab", "INPUT") == "RESULT"
+        
+        if is_sf and is_result:
+            res = self._state.solver_results.get(self.phase["id"])
+            if res:
+                msf = res.get("reached_m_stage") or res.get("m_stage")
+                if msf is not None:
+                    self.msf_label.setText(f"(\u03a3Msf: {msf:.3f})")
+                    self.msf_label.setVisible(True)
+                    return
+        self.msf_label.setVisible(False)
 
     def _show_context_menu(self, pos):
         menu = QMenu(self)
@@ -212,6 +238,7 @@ class StagingSidebar(QWidget):
         self._state.phases_changed.connect(self._sync_all)
         self._state.current_phase_changed.connect(self._sync_all)
         self._state.phase_status_changed.connect(self._on_status_changed)
+        self._state.active_tab_changed.connect(self._on_tab_changed)
 
         self.widgets_by_id = {}
         self._sync_all()
@@ -372,6 +399,8 @@ class StagingSidebar(QWidget):
             "active_water_level_id": current.get("active_water_level_id") if current else None,
             "active_beam_ids": list(current.get("active_beam_ids", [])) if current else [],
             "reset_displacements": False,
+            "kh": current.get("kh", 0.0) if current else 0.0,
+            "kv": current.get("kv", 0.0) if current else 0.0,
             "current_material": dict(current["current_material"]) if current else {},
             "parent_material": dict(current["current_material"]) if current else {}
         }
@@ -382,3 +411,8 @@ class StagingSidebar(QWidget):
     def _on_status_changed(self, phase_id, status):
         if phase_id in self.widgets_by_id:
             self.widgets_by_id[phase_id].set_status(status)
+
+    def _on_tab_changed(self, tab_name: str):
+        """Update MSF labels visibility when switching tabs."""
+        for widget in self.widgets_by_id.values():
+            widget.update_msf_display()

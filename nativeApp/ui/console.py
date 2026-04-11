@@ -45,3 +45,4 @@ class TerraSimConsole(QPlainTextEdit):
     def log(self, message: str):
         """Append a message with a prompt prefix."""
         self.appendPlainText(f"> {message}")
+        print(f"> {message}")

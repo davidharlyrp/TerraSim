@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QComboBox, QCheckBox, QPushButton, QFrame, QListView,
+    QComboBox, QCheckBox, QPushButton, QFrame, QListView, QWidget,
     QMessageBox
 )
+from PySide6.QtGui import QDoubleValidator
 from PySide6.QtCore import Qt
 from core.state import ProjectState
 
@@ -36,7 +37,6 @@ class PhaseDialog(QDialog):
                 color: #a1a1aa;
                 margin-top: 8px;
                 margin-bottom: 2px;
-                text-transform: uppercase;
             }
             QLineEdit, QComboBox {
                 background-color: #ffffff;
@@ -125,12 +125,55 @@ class PhaseDialog(QDialog):
         else:
             self.reset_cb.setVisible(False)
 
+        # Pseudo-static Analysis
+        self.pseudo_group = QWidget()
+        ps_layout = QVBoxLayout(self.pseudo_group)
+        ps_layout.setContentsMargins(0, 5, 0, 5)
+        ps_layout.setSpacing(8)
+        
+        ps_lbl = QLabel("Pseudo-static Coefficients")
+        ps_lbl.setProperty("class", "ItemLabel")
+        ps_layout.addWidget(ps_lbl)
+        
+        coeff_row = QHBoxLayout()
+        # kh
+        kh_layout = QVBoxLayout()
+        kh_lbl = QLabel("kh (Horizontal)")
+        kh_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.kh_edit = QLineEdit()
+        self.kh_edit.setPlaceholderText("0.0")
+        self.kh_edit.setValidator(QDoubleValidator(-1.0, 1.0, 4))
+        kh_layout.addWidget(kh_lbl)
+        kh_layout.addWidget(self.kh_edit)
+        coeff_row.addLayout(kh_layout)
+        
+        # kv
+        kv_layout = QVBoxLayout()
+        kv_lbl = QLabel("kv (Vertical)")
+        kv_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.kv_edit = QLineEdit()
+        self.kv_edit.setPlaceholderText("0.0")
+        self.kv_edit.setValidator(QDoubleValidator(-1.0, 1.0, 4))
+        kv_layout.addWidget(kv_lbl)
+        kv_layout.addWidget(self.kv_edit)
+        coeff_row.addLayout(kv_layout)
+        
+        ps_layout.addLayout(coeff_row)
+        layout.addWidget(self.pseudo_group)
+        
+        # Connect type change for visibility
+        self.type_cmb.currentIndexChanged.connect(self._update_visibility)
+
         # Disabling inputs if SAFETY_ANALYSIS
         if self._phase.get("phase_type") == "SAFETY_ANALYSIS":
             self.wl_cmb.setEnabled(False)
             self.reset_cb.setEnabled(False)
+            self.kh_edit.setEnabled(False)
+            self.kv_edit.setEnabled(False)
             # parent_cmb is left enabled because changing parent is a valid structural change, 
             # but it will re-sync in _on_save.
+        
+        self._update_visibility()
 
         layout.addStretch()
 
@@ -167,12 +210,36 @@ class PhaseDialog(QDialog):
             p_idx = self.parent_cmb.findData(ph.get("parent_id"))
             if p_idx >= 0: self.parent_cmb.setCurrentIndex(p_idx)
             self.reset_cb.setChecked(ph.get("reset_displacements", False))
+            
+        self.kh_edit.setText(str(ph.get("kh", "0.0")))
+        self.kv_edit.setText(str(ph.get("kv", "0.0")))
+
+    def _update_visibility(self):
+        ptype = self.type_cmb.currentData()
+        # pseudo-static is only relevant for plastic or gravity loading
+        can_ps = ptype in ["PLASTIC", "GRAVITY_LOADING"]
+        self.pseudo_group.setVisible(can_ps)
 
     def _on_save(self):
         # Update phase dictionary
         self._phase["name"] = self.name_edit.text()
-        self._phase["phase_type"] = self.type_cmb.currentData()
+        ptype = self.type_cmb.currentData()
+        self._phase["phase_type"] = ptype
         self._phase["active_water_level_id"] = self.wl_cmb.currentData()
+        
+        can_ps = ptype in ["PLASTIC", "GRAVITY_LOADING"]
+
+        if can_ps:
+            try:
+                self._phase["kh"] = float(self.kh_edit.text() or 0.0)
+                self._phase["kv"] = float(self.kv_edit.text() or 0.0)
+            except ValueError:
+                self._phase["kh"] = 0.0
+                self._phase["kv"] = 0.0
+        else:
+            # Explicitly reset for other types (SRM, K0)
+            self._phase["kh"] = 0.0
+            self._phase["kv"] = 0.0
         
         if self._phase_index > 0:
             self._phase["parent_id"] = self.parent_cmb.currentData()

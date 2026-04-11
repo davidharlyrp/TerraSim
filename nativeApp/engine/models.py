@@ -109,6 +109,8 @@ class EmbeddedBeam(BaseModel):
     id: str
     points: List[Point] # Usually 2 points for a line segment [start, end]
     materialId: str
+    head_point_index: int = 0      # 0 for P1, 1 for P2
+    head_connection_type: str = "FIXED" # "PIN" or "FIXED"
 
 class MeshSettings(BaseModel):
     mesh_size: float = 2.0
@@ -196,6 +198,8 @@ class PhaseRequest(BaseModel):
     parent_material: Dict[int, str] = {} # Map polygon_index -> material_id (inherited from parent)
     active_water_level_id: Optional[str] = None # NEW
     active_beam_ids: Optional[List[str]] = [] # IDs of active beams
+    kh: float = 0.0 # Pseudo-static horizontal coefficient
+    kv: float = 0.0 # Pseudo-static vertical coefficient
 
 class TrackPoint(BaseModel):
     id: str  # e.g., "node_14" or "gp_10_0" (element 10, gp 0)
@@ -221,6 +225,7 @@ class NodeResult(BaseModel):
     id: int # 1-based
     ux: float
     uy: float
+    rot: float = 0.0
 
 class StressResult(BaseModel):
     element_id: int # 1-based
@@ -240,11 +245,31 @@ class StressResult(BaseModel):
     eps_xy: Optional[float] = 0.0
     eps_zz: Optional[float] = 0.0
 
+class BeamResult(BaseModel):
+    beam_id: str
+    segment_index: int
+    n: float
+    v1: float
+    m1: float
+    v2: float
+    m2: float
+    # Total displacements at both nodes (Global Mesh Coordinates)
+    ux1: float
+    uy1: float
+    ux2: float
+    uy2: float
+    # Relative displacements at both nodes (since activation/installation)
+    urx1: float
+    ury1: float
+    urx2: float
+    ury2: float
+
 class PhaseResult(BaseModel):
     phase_id: str
     success: bool
-    displacements: List[NodeResult] # Incremental or Total? Usually incremental is sent, then summed.
+    displacements: List[NodeResult]
     stresses: List[StressResult]
+    beam_results: List[BeamResult] = []
     pwp: List[float] = []
     reached_m_stage: Optional[float] = 1.0 # default to 1.0 if successful
     step_failed_at: Optional[int] = None

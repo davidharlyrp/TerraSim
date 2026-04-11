@@ -19,10 +19,10 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QPlainTextEdit, QSplitter, QLabel,
     QButtonGroup, QFrame, QSizePolicy, QToolBar,
-    QFileDialog
+    QFileDialog, QDialog, QLineEdit
 )
-from PySide6.QtCore import (Qt, QSize)
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPainter, QBrush, QColor, QPen, QDesktopServices
+from PySide6.QtCore import Qt, QRectF, QPointF, QSize, QSettings, QUrl
 import os
 
 from api.workers import MeshWorker, SolveWorker
@@ -42,7 +42,116 @@ from ui.staging_sidebar import StagingSidebar
 from ui.result_canvas import ResultCanvas
 from ui.output_panel import OutputPanel
 from core.samples import SAMPLE_FOUNDATION, SAMPLE_RETAINING_WALL
+from core.licensing import unpack_license_data, verify_serial
 
+class LicenseInfoDialog(QDialog):
+    """
+    Minimalist Light Mode Modal for displaying license info and status.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("License Information")
+        self.setFixedSize(400, 320)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        
+        # Get data from QSettings
+        settings = QSettings("DaharEngineer", "TerraSim")
+        self.license_key = settings.value("license_key", "", type=str)
+        
+        self._init_ui()
+        self._apply_styles()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(10)
+
+        title = QLabel("LICENSE DETAILS")
+        title.setStyleSheet("font-weight: semibold; letter-spacing: 2px; color: #a1a1aa; font-size: 13px;")
+        layout.addWidget(title)
+        layout.addSpacing(5)
+
+        # Decode Metadata
+        user_name = "Unregistered"
+        user_email = "N/A"
+        if self.license_key and verify_serial(self.license_key):
+            _, data_part, _ = self.license_key.split("-")
+            info = unpack_license_data(data_part)
+            if info:
+                user_name = info.get("name")
+                user_email = info.get("email")
+
+        # Info widgets
+        layout.addWidget(QLabel("LICENSED TO:"))
+        name_label = QLabel(f"{user_name}")
+        name_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #18181b;")
+        layout.addWidget(name_label)
+        
+        email_label = QLabel(f"{user_email}")
+        email_label.setStyleSheet("color: #71717a; font-size: 11px;")
+        layout.addWidget(email_label)
+        
+        layout.addSpacing(10)
+
+        layout.addWidget(QLabel("SERIAL KEY:"))
+        self.key_edit = QLineEdit(self.license_key)
+        self.key_edit.setReadOnly(True)
+        self.key_edit.setFixedHeight(32)
+        layout.addWidget(self.key_edit)
+
+        layout.addSpacing(10)
+
+        # Status & Type
+        status_layout = QHBoxLayout()
+        
+        # Status
+        status_box = QVBoxLayout()
+        status_box.addWidget(QLabel("STATUS:"))
+        status_val = QLabel("Active")
+        status_val.setStyleSheet("color: #18181b; font-weight: medium;")
+        status_box.addWidget(status_val)
+        status_layout.addLayout(status_box)
+
+        # Type
+        type_box = QVBoxLayout()
+        type_box.addWidget(QLabel("TYPE:"))
+        type_val = QLabel("Free Access")
+        type_val.setStyleSheet("color: #18181b; font-weight: medium;")
+        type_box.addWidget(type_val)
+        status_layout.addLayout(type_box)
+        
+        layout.addLayout(status_layout)
+        layout.addStretch()
+
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(40)
+        btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QDialog { background-color: #ffffff; }
+            QLabel { color: #a1a1aa; font-size: 10px; font-weight: semibold; }
+            QLineEdit { 
+                background-color: #f8fafc; 
+                border: 1px solid #e4e4e7; 
+                border-radius: 0px; 
+                color: #52525b; 
+                padding: 5px;
+                font-family: 'Consolas', monospace;
+                font-size: 11px;
+            }
+            QPushButton { 
+                background-color: #18181b; 
+                border: none; 
+                color: #ffffff; 
+                font-weight: bold; 
+                border-radius: 4px; 
+                letter-spacing: 1px;
+            }
+            QPushButton:hover { background-color: #3f3f46; }
+        """)
 
 class MainWindow(QMainWindow):
     """
@@ -51,7 +160,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, initial_file: str = None):
         super().__init__()
-        self.setWindowTitle("TerraSim 0.5.1 Beta - Geotechnical Finite Element Analysis")
+        self.setWindowTitle("TerraSim 0.6.0 Beta - Geotechnical Finite Element Analysis")
         self.resize(1200, 800)
 
         # Project state (singleton)
@@ -84,6 +193,7 @@ class MainWindow(QMainWindow):
         self.state.project_name_changed.connect(self._update_window_title)
         self.state.state_changed.connect(self._update_window_title)
         self.state.solver_response_changed.connect(self._update_tab_safety)
+        self.state.solver_response_changed.connect(self.output_panel.update_action_state)
 
         # Connect explorer signals
         self.explorer.edit_material_requested.connect(self._on_edit_material)
@@ -342,14 +452,22 @@ class MainWindow(QMainWindow):
 
         # Help Menu
         help_menu = menu_bar.addMenu("Help")
-        action_about = help_menu.addAction("About TerraSim")
+        action_webapp = help_menu.addAction("Open TerraSim WebApp")
+        action_webapp.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://terrasim.daharengineer.com")))
         action_license = help_menu.addAction("License")
-        manual_menu = help_menu.addAction("Manual")
+        action_license.triggered.connect(self._on_show_license_info)
         help_menu.addSeparator()
         action_feedback = help_menu.addAction("Feedback / Report Bug")
+        action_feedback.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://daharengineer.com/contact")))
         help_menu.addSeparator()
         action_daharengineer = help_menu.addAction("Dahar Engineer")
+        action_daharengineer.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://daharengineer.com")))
 
+
+    def _on_show_license_info(self):
+        """Displays the license information dialog."""
+        dlg = LicenseInfoDialog(self)
+        dlg.exec()
 
     def _on_open_preferences(self):
         """Open the simulation parameters dialog."""
@@ -510,7 +628,7 @@ class MainWindow(QMainWindow):
         p_name = self.state.project_name
         path = self.state.current_file_path
         file_str = f" - [{os.path.basename(path)}]" if path else ""
-        self.setWindowTitle(f"TerraSim 0.5.1 Beta - {p_name}{file_str}")
+        self.setWindowTitle(f"TerraSim 0.6.0 Beta - {p_name}{file_str}")
 
     def _log(self, message: str):
         self.console.log(message)

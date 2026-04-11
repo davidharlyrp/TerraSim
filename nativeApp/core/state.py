@@ -70,6 +70,7 @@ class ProjectState(QObject):
     # Mesh generation results
     mesh_response_changed = Signal(object)  # dict | None — MeshResponse from backend
     mesh_settings_changed = Signal(dict)    # dict — mesh_size, etc.
+    tracked_points_changed = Signal(list)   # list[dict] — nodes/GPs being tracked
 
     # Tool / interaction state
     tool_mode_changed    = Signal(str)    # current tool mode string
@@ -186,6 +187,10 @@ class ProjectState(QObject):
             "boundary_refinement_factor": 1.0,
         }
 
+        # Tracked points for simulation output monitoring
+        # Each: {"id", "type", "index", "gp_index", "label", "x", "y"}
+        self._tracked_points: list[dict] = []
+
         # Current tool mode — determines how mouse events behave on the canvas
         #   'SELECT'            — default pointer / selection mode
         #   'DRAW_POLYGON'      — click to add polygon vertices
@@ -195,6 +200,8 @@ class ProjectState(QObject):
         #   'DRAW_WATER_LEVEL'  — click to draw water level polyline
         #   'DRAW_EMBEDDED_BEAM'— click to draw embedded beam
         self._tool_mode: str = "SELECT"
+        # Snapshot of tracked points to allow cancel/rollback
+        self._tracked_points_checkpoint: list[dict] = []
 
         # Currently selected entity (or None)
         # {"type": "polygon"|"load"|..., "id": str|int}
@@ -219,6 +226,7 @@ class ProjectState(QObject):
         # Output settings
         self.output_type = OutputType.DEFORMED_MESH
         self.deformation_scale = 1.0
+        self.show_ebr = False
 
         # Temporary drawing buffer — stores vertices while user is drawing
         self._drawing_points: list[dict] = []
@@ -371,6 +379,15 @@ class ProjectState(QObject):
     def mesh_settings(self) -> dict:
         return dict(self._mesh_settings)
 
+    @property
+    def tracked_points(self) -> list[dict]:
+        return list(self._tracked_points)
+
+    @property
+    def solver_results(self) -> dict[str, dict]:
+        """Mapping of phase_id -> result data dict."""
+        return dict(self._solver_results)
+
     # =====================================================================
     # Undo / Redo Journal
     # =====================================================================
@@ -391,7 +408,8 @@ class ProjectState(QObject):
             "phases": copy.deepcopy(self._phases),
             "current_phase_index": self._current_phase_index,
             "settings": copy.deepcopy(self._settings),
-            "mesh_settings": copy.deepcopy(self._mesh_settings)
+            "mesh_settings": copy.deepcopy(self._mesh_settings),
+            "tracked_points": copy.deepcopy(self._tracked_points)
         }
         
         # If we are not at the top of the stack, truncate the future
@@ -437,6 +455,7 @@ class ProjectState(QObject):
         self._current_phase_index = snap.get("current_phase_index", 0)
         self._settings = copy.deepcopy(snap["settings"])
         self._mesh_settings = copy.deepcopy(snap["mesh_settings"])
+        self._tracked_points = copy.deepcopy(snap.get("tracked_points", []))
         
         if not self._phases:
             self._ensure_initial_phase()
@@ -453,6 +472,7 @@ class ProjectState(QObject):
         self.phases_changed.emit(self._phases)
         self.current_phase_changed.emit(self._current_phase_index)
         self.settings_changed.emit(self._settings)
+        self.tracked_points_changed.emit(self._tracked_points)
         
         # Clear selection on undo/redo to prevent ghost references
         self._selected_entity = None
@@ -743,6 +763,26 @@ class ProjectState(QObject):
         self.state_changed.emit()
         self._push_snapshot("Remove Beam")
 
+    def update_embedded_beam(self, beam_id: str, data: dict) -> None:
+        """Update properties or endpoints of a beam."""
+        for b in self._embedded_beams:
+            if b.get("id") == beam_id:
+                b.update(data)
+                break
+        self.embedded_beams_changed.emit(self._embedded_beams)
+        self.state_changed.emit()
+        self._push_snapshot("Update Beam")
+
+    def update_embedded_beam_material(self, beam_id: str, material_id: str) -> None:
+        """Assign a structural material to a beam."""
+        for b in self._embedded_beams:
+            if b.get("id") == beam_id:
+                b["materialId"] = material_id
+                break
+        self.embedded_beams_changed.emit(self._embedded_beams)
+        self.state_changed.emit()
+        self._push_snapshot("Update Beam Material")
+
     # ---- Staging / Phases ------------------------------------------------
 
     def _ensure_initial_phase(self):
@@ -758,6 +798,8 @@ class ProjectState(QObject):
                 "active_water_level_id": None,
                 "active_beam_ids": [],
                 "reset_displacements": False,
+                "kh": 0.0,
+                "kv": 0.0,
                 "current_material": {str(i): p.get("materialId", "") for i, p in enumerate(self._polygons)},
                 "parent_material": {}
             }
@@ -845,13 +887,16 @@ class ProjectState(QObject):
             
             # Check for Safety Phase restriction
             if phase.get("phase_type") == "SAFETY_ANALYSIS":
-                # We only allow changing name/id (metadata), 
-                # but NOT model data (active elements, materials, etc.)
-                # If 'active_polygon_indices' or 'current_material' is in data, block it.
-                restricted_keys = ["active_polygon_indices", "active_load_ids", "active_water_level_id", "current_material", "reset_displacements"]
-                if any(k in data for k in restricted_keys):
-                    self.log(f"Cannot modify '{phase.get('name')}'. Safety Analysis phases must follow their parent structure.")
-                    return
+                # We block model data changes (active elements, materials, etc.) 
+                # but only if they differ from current values.
+                restricted_keys = [
+                    "active_polygon_indices", "active_load_ids", "active_water_level_id", 
+                    "current_material", "reset_displacements", "kh", "kv"
+                ]
+                for k in restricted_keys:
+                    if k in data and data[k] != phase.get(k):
+                        self.log(f"Cannot modify model structure of '{phase.get('name')}'. Safety Analysis must follow its parent.")
+                        return
 
             old_parent_id = phase.get("parent_id")
             new_parent_id = data.get("parent_id", old_parent_id) if "parent_id" in data else old_parent_id
@@ -963,12 +1008,29 @@ class ProjectState(QObject):
     def set_output_type(self, output_type: OutputType):
         if self.output_type != output_type:
             self.output_type = output_type
-            self.output_settings_changed.emit({"type": self.output_type, "scale": self.deformation_scale})
+            self.output_settings_changed.emit({
+                "type": self.output_type, 
+                "scale": self.deformation_scale,
+                "show_ebr": self.show_ebr
+            })
 
     def set_deformation_scale(self, scale: float):
         if self.deformation_scale != scale:
             self.deformation_scale = scale
-            self.output_settings_changed.emit({"type": self.output_type, "scale": self.deformation_scale})
+            self.output_settings_changed.emit({
+                "type": self.output_type, 
+                "scale": self.deformation_scale,
+                "show_ebr": self.show_ebr
+            })
+
+    def set_show_ebr(self, show: bool):
+        if self.show_ebr != show:
+            self.show_ebr = show
+            self.output_settings_changed.emit({
+                "type": self.output_type, 
+                "scale": self.deformation_scale,
+                "show_ebr": self.show_ebr
+            })
 
     # ---- Solver Results ----
 
@@ -998,6 +1060,12 @@ class ProjectState(QObject):
                 self._drawing_points.clear()
                 self.drawing_points_changed.emit(self._drawing_points)
 
+            # Capture snapshot when entering PICK_POINT mode
+            if mode == "PICK_POINT":
+                import copy
+                self._tracked_points_checkpoint = copy.deepcopy(self._tracked_points)
+                self.log("Snapshot taken: entry PICK_POINT mode.")
+
             self._tool_mode = mode
             self.tool_mode_changed.emit(mode)
             self.state_changed.emit()
@@ -1025,8 +1093,15 @@ class ProjectState(QObject):
     # ---- Mesh Response -----------------------------------------------------
 
     def set_mesh_response(self, response: dict | None):
-        """Cache the latest successful mesh response from backend."""
+        """Cache the latest successful mesh response from backend. Clears track points."""
         self._mesh_response = response
+        
+        # Reset tracked points when mesh changes (as they rely on old indices)
+        if hasattr(self, "_tracked_points") and self._tracked_points:
+            self._tracked_points = []
+            self.tracked_points_changed.emit(self._tracked_points)
+            self.log("[INFO] Tracked points reset due to new mesh generation.")
+
         self.mesh_response_changed.emit(response)
         if response:
             self.state_changed.emit()
@@ -1036,6 +1111,21 @@ class ProjectState(QObject):
         self._mesh_settings.update(settings)
         self.mesh_settings_changed.emit(self._mesh_settings)
         self.state_changed.emit()
+
+    # ---- Tracked Points ----------------------------------------------------
+
+    def set_tracked_points(self, points: list[dict]):
+        """Replace the list of tracked points."""
+        self._tracked_points = list(points)
+        self.tracked_points_changed.emit(self._tracked_points)
+        self.state_changed.emit()
+        self._push_snapshot("Update Tracked Points")
+
+    def rollback_tracked_points(self):
+        """Revert tracked points to the last checkpoint (before picking started)."""
+        self._tracked_points = list(self._tracked_points_checkpoint)
+        self.tracked_points_changed.emit(self._tracked_points)
+        self.log("Tracked points reverted to last saved state.")
 
     # =====================================================================
     # Serialization — Prepare payload for backend API calls
@@ -1147,6 +1237,8 @@ class ProjectState(QObject):
                 "id": eb.get("id", ""),
                 "points": points,
                 "materialId": eb.get("materialId", ""),
+                "head_point_index": eb.get("head_point_index", 0),
+                "head_connection_type": eb.get("head_connection_type", "FIXED"),
             })
 
         # Beam Materials: Ensure Pydantic parity
@@ -1206,7 +1298,9 @@ class ProjectState(QObject):
                 "current_material": {str(k): v for k, v in ph.get("current_material", {}).items()},
                 "parent_material": {str(k): v for k, v in ph.get("parent_material", {}).items()},
                 "active_water_level_id": ph.get("active_water_level_id"),
-                "active_beam_ids": ph.get("active_beam_ids", [])
+                "active_beam_ids": ph.get("active_beam_ids", []),
+                "kh": ph.get("kh", 0.0),
+                "kv": ph.get("kv", 0.0)
             })
 
         # 3. Materials Library
@@ -1239,7 +1333,16 @@ class ProjectState(QObject):
             "embedded_beams": mesh_helpers.get("embedded_beams", []),
             "materials": materials_payload,
             "beam_materials": list(self._beam_materials),
-            "track_points": []
+            "track_points": [
+                {
+                    "id": p["id"],
+                    "type": p["type"],
+                    "index": p["index"],
+                    "gp_index": p.get("gp_index"),
+                    "label": p["label"]
+                }
+                for p in self._tracked_points
+            ]
         }
 
 
@@ -1277,6 +1380,7 @@ class ProjectState(QObject):
             "solverResults": deep_dict(self._solver_results),
             "meshResponse": deep_dict(self._mesh_response),
             "meshSettings": dict(self._mesh_settings),
+            "trackedPoints": list(self._tracked_points),
             "settings": dict(self._settings),
             "outputType": self.output_type.value if hasattr(self.output_type, "value") else str(self.output_type),
             "deformationScale": self.deformation_scale
@@ -1301,6 +1405,7 @@ class ProjectState(QObject):
         self._phase_statuses = dict(data.get("phaseStatuses", {}))
         self._solver_results = dict(data.get("solverResults", {}))
         self._mesh_response = data.get("meshResponse")
+        self._tracked_points = list(data.get("trackedPoints", []))
         
         if not self._phases:
             self._ensure_initial_phase()
@@ -1336,6 +1441,7 @@ class ProjectState(QObject):
         self.current_phase_changed.emit(self._current_phase_index)
         self.mesh_settings_changed.emit(self._mesh_settings)
         self.mesh_response_changed.emit(self._mesh_response)
+        self.tracked_points_changed.emit(self._tracked_points)
         self.tool_mode_changed.emit(self._tool_mode)
         self.selection_changed.emit(self._selected_entity)
         self.drawing_points_changed.emit(self._drawing_points)

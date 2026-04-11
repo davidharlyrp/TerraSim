@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import (
     QPen, QBrush, QColor, QPolygonF, QPainter, QPainterPath,
-    QWheelEvent, QMouseEvent
+    QWheelEvent, QMouseEvent, QTransform
 )
 
 from core.state import ProjectState, OutputType
@@ -291,8 +291,10 @@ class ResultCanvas(QGraphicsView):
             elif v < 0.75: r, g, b = int((v-0.5)*4*255), 255, 0
             else: r, g, b = 255, int((1.0-v)*4*255), 0
         v_min, v_max = 0.0, 1.0
-        if nodal_raw:
-            v_min, v_max = min(nodal_raw), max(nodal_raw)
+        if self._last_nodal_vals:
+            # Use averaged values for normalization to match Legend and avoid raw spikes
+            avg_vals = [v[0]/v[1] for v in self._last_nodal_vals.values()]
+            v_min, v_max = min(avg_vals), max(avg_vals)
             if v_min == v_max: v_max += 1e-9
 
         # 6. VECTOR CONTOUR GENERATION (Layer 1: Fills at Z=12)
@@ -308,10 +310,9 @@ class ResultCanvas(QGraphicsView):
                 if pid not in poly_to_elements: poly_to_elements[pid] = []
                 poly_to_elements[pid].append(idx)
 
-            # Generate contour bands per polygon - INCREASED TO 20 LEVELS PER USER REQUEST
             num_levels = 20
-            cmap_name = 'jet_r' if ("sigma" in str(out_type).lower() or "pwp" in str(out_type).lower()) else 'jet'
-            cmap = cm.get_cmap(cmap_name)
+            # Use standard 'jet' and manual inversion logic to keep consistent with Legend CSS
+            cmap = cm.get_cmap('jet')
             
             for pid, elem_indices in poly_to_elements.items():
                 try:
@@ -351,22 +352,12 @@ class ResultCanvas(QGraphicsView):
                     paths = cntr.allsegs if hasattr(cntr, 'allsegs') else cntr.get_paths()
                     
                     for level_idx, path_data in enumerate(paths):
-                        # Calculate color for this band (between level_idx and level_idx+1)
                         t_val = (levels[level_idx] + levels[level_idx+1]) / 2.0
                         v_norm = (t_val - v_min) / (v_max - v_min)
-                        if ("sigma" in str(out_type).lower() or "pwp" in str(out_type).lower()): v_norm = 1.0 - v_norm
                         
                         color = cmap(v_norm)
                         qcolor = QColor(int(color[0]*255), int(color[1]*255), int(color[2]*255), 255)
                         
-                        # Process paths (can be a standard Path object or a list of vertices)
-                        # Matplotlib 3.8 'get_paths()' returns Path objects
-                        contour_paths = [path_data] if hasattr(path_data, 'to_polygons') else []
-                        # Fallback for older versions if needed
-                        if not contour_paths and isinstance(path_data, (list, np.ndarray)):
-                             # Older versions or allsegs structure
-                             pass 
-
                         for path in cntr.get_paths()[level_idx:level_idx+1]:
                             qpath = QPainterPath()
                             for poly in path.to_polygons():
@@ -475,33 +466,83 @@ class ResultCanvas(QGraphicsView):
                 p_item.setZValue(20); self._mesh_items.append(p_item)
 
         # --- Layer 4: STRUCTURAL BEAMS (Z=22) ---
-        bm_lookup = {m.get("id"): m for m in self._state.beam_materials}
-        active_beam_ids = set(current_phase.get("active_beam_ids", [])) if current_phase else set()
-        
-        for b in self._state.embedded_beams:
-            bid = b.get("id")
-            if bid not in active_beam_ids: continue
+        show_ebr = getattr(self._state, "show_ebr", False)
+        if show_ebr:
+            bm_lookup = {m.get("id"): m for m in self._state.beam_materials}
+            active_beam_ids = set(current_phase.get("active_beam_ids", [])) if current_phase else set()
             
-            mid = b.get("materialId")
-            color = QColor(bm_lookup[mid].get("color", "#2563eb")) if mid and mid in bm_lookup else QColor("#2563eb")
-            
-            x1, y1 = b.get("x1"), b.get("y1")
-            x2, y2 = b.get("x2"), b.get("y2")
-            
-            # Deform beams if needed
-            n_idx1 = nodes_lookup.get((round(x1, 5), round(y1, 5)))
-            if n_idx1 is not None and n_idx1 in disp_map:
-                dx, dy = disp_map[n_idx1]; x1 += dx * scale; y1 += dy * scale
+            # Helper to get deformed positions
+            def get_deformed_pos(n_idx):
+                x, y = nodes[n_idx][0], nodes[n_idx][1]
+                if n_idx in disp_map:
+                    dx, dy = disp_map[n_idx]; x += dx * scale; y += dy * scale
+                return QPointF(x, y)
+
+            # Draw beams using assignments (segmented/curved)
+            assignments = self._mesh_data.get("embedded_beam_assignments", [])
+            beam_defs = {b.get("id"): b for b in self._state.embedded_beams}
+
+            for assign in assignments:
+                bid = assign.get("beam_id")
+                if bid not in active_beam_ids: continue
                 
-            n_idx2 = nodes_lookup.get((round(x2, 5), round(y2, 5)))
-            if n_idx2 is not None and n_idx2 in disp_map:
-                dx, dy = disp_map[n_idx2]; x2 += dx * scale; y2 += dy * scale
+                b_def = beam_defs.get(bid, {})
+                mid = b_def.get("materialId")
+                color = QColor(bm_lookup[mid].get("color", "#2563eb")) if mid and mid in bm_lookup else QColor("#2563eb")
                 
-            pen = QPen(color, 4)
-            pen.setCosmetic(True)
-            b_item = self._scene.addLine(x1, y1, x2, y2, pen)
-            b_item.setZValue(22)
-            self._mesh_items.append(b_item)
+                pen = QPen(color, 4)
+                pen.setCosmetic(True)
+                
+                n_ids = assign.get("nodes", [])
+                if len(n_ids) < 2: continue
+
+                # Draw segments between nodes
+                for i in range(len(n_ids) - 1):
+                    p1 = get_deformed_pos(n_ids[i] - 1)
+                    p2 = get_deformed_pos(n_ids[i+1] - 1)
+                    
+                    line_item = self._scene.addLine(p1.x(), p1.y(), p2.x(), p2.y(), pen)
+                    line_item.setZValue(22)
+                    line_item.setData(Qt.UserRole, bid)
+                    line_item.setData(Qt.UserRole + 1, "embedded_beam")
+                    self._mesh_items.append(line_item)
+
+                # 5. Draw Connection Marker at Head
+                h_idx = b_def.get("head_point_index", 0)
+                h_node_gi = (n_ids[0] - 1) if h_idx == 0 else (n_ids[-1] - 1)
+                neighbor_gi = (n_ids[1] - 1) if h_idx == 0 else (n_ids[-2] - 1)
+                
+                h_pos = get_deformed_pos(h_node_gi)
+                n_pos = get_deformed_pos(neighbor_gi)
+                
+                head_conn = str(b_def.get("head_connection_type", "FIXED")).upper()
+                marker_size = 0.15
+                
+                h_pen = QPen(color, 0.1)
+                h_brush = QBrush(color)
+                
+                if head_conn in ["FIXED", "FIX"]:
+                    # Square
+                    box_sz = 0.15
+                    rect_item = self._scene.addRect(
+                        h_pos.x() - box_sz/2, h_pos.y() - box_sz/2, box_sz, box_sz,
+                        h_pen, h_brush
+                    )
+                    rect_item.setZValue(25)
+                    self._mesh_items.append(rect_item)
+                else:
+                    # Triangle pointing into beam along the first segment
+                    angle_rad = math.atan2(n_pos.y() - h_pos.y(), n_pos.x() - h_pos.x())
+                    
+                    p_tri = [QPointF(0, 0), QPointF(marker_size, -marker_size/2.5), QPointF(marker_size, marker_size/2.5)]
+                    q_poly = QPolygonF(p_tri)
+                    
+                    trans = QTransform().translate(h_pos.x(), h_pos.y()).rotateRadians(angle_rad)
+                    rotated_poly = trans.map(q_poly)
+                    
+                    tri_item = self._scene.addPolygon(rotated_poly, h_pen, h_brush)
+                    tri_item.setZValue(25)
+                    self._mesh_items.append(tri_item)
 
         # Update Legend Panel
         self._update_legend(v_min, v_max, out_type)
@@ -621,6 +662,32 @@ class ResultCanvas(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Handle double-click on EBR to show details."""
+        item = self.itemAt(event.position().toPoint())
+        if item:
+            bid = item.data(Qt.UserRole)
+            itype = item.data(Qt.UserRole + 1)
+            
+            if itype == "embedded_beam" and bid:
+                self._open_beam_detail(bid)
+                event.accept()
+                return
+        
+        super().mouseDoubleClickEvent(event)
+
+    def _open_beam_detail(self, beam_id):
+        """Open the detailed output window for a specific beam."""
+        from ui.beam_detail_dialog import BeamDetailDialog
+        dlg = BeamDetailDialog(beam_id, self.window())
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _on_output_settings_changed(self, settings):
+        """Trigger re-render when contour type, scale, or EBR visibility changes."""
+        self._render_mesh()
+
     def _handle_hover_tooltip(self, scene_pos, global_pos):
         """Find the element under the mouse and interpolate its value."""
         if not self._mesh_data: return
@@ -668,12 +735,24 @@ class ResultCanvas(QGraphicsView):
                 return (d < 0) == (s < 0) or d == 0
                 
             if pt_in_tri((scene_pos.x(), scene_pos.y()), v1, v2, v3):
-                val_sum, count = 0.0, 0
-                for i in range(3):
-                    nv = self._get_nodal_value_safe(elem[i])
-                    if nv is not None:
-                        val_sum += nv; count += 1
-                if count > 0: found_val = val_sum / count
+                # Barycentric Interpolation for pinpoint accuracy
+                def get_barycentric(p, p1, p2, p3):
+                    denom = (p2[1]-p3[1])*(p1[0]-p3[0]) + (p3[0]-p2[0])*(p1[1]-p3[1])
+                    if abs(denom) < 1e-12: return 1/3, 1/3, 1/3
+                    w1 = ((p2[1]-p3[1])*(p[0]-p3[0]) + (p3[0]-p2[0])*(p[1]-p3[1])) / denom
+                    w2 = ((p3[1]-p1[1])*(p[0]-p3[0]) + (p1[0]-p3[0])*(p[1]-p3[1])) / denom
+                    w3 = 1.0 - w1 - w2
+                    return w1, w2, w3
+
+                w1, w2, w3 = get_barycentric((scene_pos.x(), scene_pos.y()), v1, v2, v3)
+                
+                # Retrieve individual nodal results
+                nv1 = self._get_nodal_value_safe(elem[0])
+                nv2 = self._get_nodal_value_safe(elem[1])
+                nv3 = self._get_nodal_value_safe(elem[2])
+                
+                if None not in [nv1, nv2, nv3]:
+                    found_val = w1*nv1 + w2*nv2 + w3*nv3
                 break
         
         if found_val is not None:

@@ -26,12 +26,12 @@ from __future__ import annotations
 import time
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
-    QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsPathItem, QGraphicsItem
+    QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsPathItem, QGraphicsItem, QGraphicsRectItem
 )
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import (
     QPen, QBrush, QColor, QPolygonF, QPainter, QPainterPath,
-    QWheelEvent, QMouseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent
+    QWheelEvent, QMouseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFont, QTransform
 )
 
 from core.state import ProjectState
@@ -210,9 +210,15 @@ class TerraSimCanvas(QGraphicsView):
         # Track committed polygon items for re-rendering
         self._polygon_items: list[QGraphicsPolygonItem] = []
         self._beam_items: list[QGraphicsLineItem] = []
+        self._beam_head_items: list[QGraphicsRectItem] = []
 
         # Track mesh wireframe items (drawn after backend returns mesh)
         self._mesh_items: list[QGraphicsPathItem] = []
+        
+        # Track pickable markers for PICK_POINT mode
+        self._pickable_items: list[QGraphicsItem] = []
+        self._node_markers: dict[int, QGraphicsEllipseItem] = {} # node_idx -> item
+        self._gp_markers: dict[str, QGraphicsEllipseItem] = {}   # "el_idx:gp_idx" -> item
 
         # Throttled Mesh Redraw Timer (to prevent crashes during rapid staging toggles)
         from PySide6.QtCore import QTimer
@@ -228,16 +234,19 @@ class TerraSimCanvas(QGraphicsView):
         self._state.point_loads_changed.connect(self._on_point_loads_changed)
         self._state.line_loads_changed.connect(self._on_line_loads_changed)
         self._state.water_levels_changed.connect(self._on_water_levels_changed)
+        self._state.tracked_points_changed.connect(self._on_tracked_points_changed)
 
         # Track items for persistent entities
         self._load_items: list[QGraphicsItem] = []
         self._water_items: list[QGraphicsItem] = []
+        self._tracked_marker_items: list[QGraphicsItem] = []
 
         # ---- Drag-and-drop support (material assignment) ----
         self.setAcceptDrops(True)
 
         # Connect to tab changes to handle visibility and toolbar repositioning
         self._state.active_tab_changed.connect(self._on_tab_changed)
+        self._state.tool_mode_changed.connect(self._on_tool_mode_changed)
 
         # Connect to phase changes for dynamic staging updates
         self._state.current_phase_changed.connect(self._on_current_phase_changed)
@@ -262,11 +271,17 @@ class TerraSimCanvas(QGraphicsView):
         self._on_line_loads_changed(self._state.line_loads)
         self._on_water_levels_changed(self._state.water_levels)
 
-        # Hide Water Levels in MESH tab
-        show_water = tab_name != "MESH"
-        for item in getattr(self, "_water_level_items", []):
-            item.setVisible(show_water)
-            
+        # Auto-deactivate PICK_POINT if leaving MESH tab (Reset to last save)
+        if tab_name != "MESH" and self._state.tool_mode == "PICK_POINT":
+            self._state.rollback_tracked_points()
+            self._state.set_tool_mode("SELECT")
+
+        # Refresh persistent tracked points (MESH ONLY)
+        if tab_name == "MESH" and self._state.tool_mode != "PICK_POINT":
+            self._render_tracked_points()
+        else:
+            self._clear_tracked_markers()
+
         # Refresh viewport to apply grid visibility changes (drawn in drawBackground)
         self.viewport().update()
         self._scene.update()
@@ -462,16 +477,22 @@ class TerraSimCanvas(QGraphicsView):
         self._clear_temp_items()
 
         # Change cursor based on mode
-        if mode == "SELECT":
-            self.setCursor(Qt.ArrowCursor)
-        elif mode in ("DRAW_POLYGON", "DRAW_RECTANGLE", "DRAW_WATER_LEVEL", "DRAW_EMBEDDED_BEAM"):
-            self.setCursor(Qt.CrossCursor)
-        elif mode in ("ADD_POINT_LOAD", "ADD_LINE_LOAD"):
-            self.setCursor(Qt.CrossCursor)
-        elif mode == "ASSIGN_MATERIAL":
+        if mode == "PICK_POINT":
             self.setCursor(Qt.PointingHandCursor)
+            self._show_pickable_points()
         else:
-            self.setCursor(Qt.ArrowCursor)
+            # Clear interactive markers for all other modes
+            self._clear_pickable_points()
+            self._render_tracked_points()
+
+            if mode == "SELECT":
+                self.setCursor(Qt.ArrowCursor)
+            elif mode in ("DRAW_POLYGON", "DRAW_RECTANGLE", "DRAW_WATER_LEVEL", "DRAW_EMBEDDED_BEAM", "ADD_POINT_LOAD", "ADD_LINE_LOAD"):
+                self.setCursor(Qt.CrossCursor)
+            elif mode == "ASSIGN_MATERIAL":
+                self.setCursor(Qt.PointingHandCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
 
     def _on_drawing_points_changed(self, points: list[dict]):
         """
@@ -587,12 +608,15 @@ class TerraSimCanvas(QGraphicsView):
 
     def _on_embedded_beams_changed(self, beams: list[dict]):
         """Render structural beams as lines colored by material."""
+        # Clear old beams and heads
         for item in self._beam_items:
             self._scene.removeItem(item)
         self._beam_items.clear()
+        for item in self._beam_head_items:
+            self._scene.removeItem(item)
+        self._beam_head_items.clear()
 
         bm_lookup = {m.get("id"): m for m in self._state.beam_materials}
-        
         is_staging = self._state.active_tab == "STAGING"
         current_phase = self._state.current_phase if is_staging else None
 
@@ -617,13 +641,46 @@ class TerraSimCanvas(QGraphicsView):
             pen = QPen(color, 3 if is_active else 1)
             pen.setCosmetic(True)
             
-            # Selection override applied in _on_selection_changed
-            
+            # 1. Add Beam Line
             line = self._scene.addLine(x1, y1, x2, y2, pen)
             line.setZValue(60) # Above mesh (50), below loads (150)
             line.setData(Qt.UserRole, bid)
             line.setData(Qt.UserRole + 1, "embedded_beam")
             self._beam_items.append(line)
+            
+            # 2. Add Head Symbol
+            h_idx = b.get("head_point_index", 0)
+            px, py = (x1, y1) if h_idx == 0 else (x2, y2)
+            tx, ty = (x2, y2) if h_idx == 0 else (x1, y1)
+            
+            head_conn = str(b.get("head_connection_type", "FIXED")).upper()
+            marker_size = 0.15 # Scene units (meters)
+            
+            color_head = color if is_active else QColor("#d1d5db")
+            if not is_active: color_head.setAlpha(120)
+            h_pen = QPen(color_head, 0.1)
+            h_brush = QBrush(color_head)
+
+            if head_conn in ["FIXED", "FIX"]:
+                # Square
+                rect = self._scene.addRect(px - marker_size/2, py - marker_size/2, marker_size, marker_size, h_pen, h_brush)
+                rect.setZValue(65)
+                self._beam_head_items.append(rect)
+            else:
+                # Triangle pointing into beam
+                import math
+                angle_rad = math.atan2(ty - py, tx - px)
+                
+                p_tri = [QPointF(0, 0), QPointF(marker_size, -marker_size/2.5), QPointF(marker_size, marker_size/2.5)]
+                q_poly = QPolygonF(p_tri)
+                
+                trans = QTransform().translate(px, py).rotateRadians(angle_rad)
+                rotated_poly = trans.map(q_poly)
+                
+                tri_item = self._scene.addPolygon(rotated_poly, h_pen, h_brush)
+                tri_item.setZValue(65)
+                self._beam_head_items.append(tri_item)
+
 
         # Apply selection
         self._on_selection_changed(self._state.selected_entity)
@@ -759,9 +816,21 @@ class TerraSimCanvas(QGraphicsView):
         """Actually perform the mesh redraw after the throttle interval."""
         if self._state.mesh_response:
             self.draw_mesh(self._state.mesh_response)
+            show_mesh = self._state.active_tab in ["MESH", "RESULT"]
+            for item in self._mesh_items:
+                item.setVisible(show_mesh)
+        
+        # Always update persistent tracked points if in MESH/RESULT tab
+        if self._state.active_tab in ["MESH", "RESULT"] and self._state.tool_mode != "PICK_POINT":
+            self._render_tracked_points()
+        else:
+            self._clear_tracked_markers()
 
     def _on_mesh_response_changed(self, mesh_data: dict | None):
         """Re-render mesh when the backend returns new data."""
+        if self._state.tool_mode == "PICK_POINT":
+            self._show_pickable_points()
+            
         if mesh_data:
             self.draw_mesh(mesh_data)
             # Immediatley apply tab-based visibility
@@ -770,6 +839,109 @@ class TerraSimCanvas(QGraphicsView):
                 item.setVisible(show_mesh)
         else:
             self.clear_mesh()
+
+    def _show_pickable_points(self):
+        """Render all nodes and Gauss Points as clickable markers (Picking Mode)."""
+        # Strict isolation: Only allow picking in MESH tab
+        if self._state.active_tab != "MESH":
+            self._clear_pickable_points()
+            return
+            
+        self._clear_pickable_points()
+        self._clear_tracked_markers() # Hide persistent markers while picking to avoid overlap
+        
+        mesh = self._state.mesh_response
+        if not mesh: return
+        
+        nodes = mesh.get("nodes", [])
+        elements = mesh.get("elements", [])
+        
+        # Compact style for picking
+        pen = QPen(QColor("#94a3b8"), 1) # slate-400
+        pen.setCosmetic(True)
+        brush_node = QBrush(QColor("#f1f5f9")) # slate-100
+        brush_gp   = QBrush(QColor("#ecfdf5")) # emerald-50
+        
+        tracked = { (p["type"], p["index"], p.get("gp_index")): p.get("label", "?") for p in self._state.tracked_points }
+        
+        # Font for labels
+        label_font = QFont("Inter", 8, QFont.Bold)
+
+        transform = QTransform()
+        transform.scale(0.015,-0.015)
+
+        # 1. Draw Nodes
+        r = 0.1 # Compact
+        for i, n in enumerate(nodes):
+            x, y = n[0], n[1]
+            ellipse = self._scene.addEllipse(x-r, y-r, r*2, r*2, pen, brush_node)
+            ellipse.setZValue(200)
+            ellipse.setData(Qt.UserRole, i)
+            ellipse.setData(Qt.UserRole + 1, "node")
+            
+            label = tracked.get(("node", i, None))
+            if label:
+                # Highlighted
+                sel_pen = QPen(QColor("#ef4444"), 1, Qt.SolidLine)
+                sel_pen.setCosmetic(True)
+                ellipse.setBrush(QBrush(QColor("#f87171")))
+                ellipse.setPen(sel_pen)
+                
+                # Add Text Label
+                txt = self._scene.addSimpleText(label, label_font)
+                txt.setBrush(QBrush(QColor("#b91c1c"))) # red-700
+                txt.setPos(x + r*1.5, y + r*3)
+                # Text in scene units needs extreme downscaling if items are small
+                # Or set it to ignore transformations for readability?
+                # For now, let's use a very small scale to match geotechnical dimensions (m)
+                txt.setTransform(transform) 
+                txt.setZValue(210)
+                self._pickable_items.append(txt)
+
+            self._pickable_items.append(ellipse)
+            self._node_markers[i] = ellipse
+
+        # 2. Draw Gauss Points
+        gp_r = 0.06 # Compact
+        for i, el in enumerate(elements):
+            if len(el) < 3: continue
+            p1, p2, p3 = nodes[el[0]], nodes[el[1]], nodes[el[2]]
+            gps = [(1/6, 1/6, 2/3), (1/6, 2/3, 1/6), (2/3, 1/6, 1/6)]
+            
+            for gp_idx, (l1, l2, l3) in enumerate(gps):
+                gx = l1*p1[0] + l2*p2[0] + l3*p3[0]
+                gy = l1*p1[1] + l2*p2[1] + l3*p3[1]
+                
+                ellipse = self._scene.addEllipse(gx-gp_r, gy-gp_r, gp_r*2, gp_r*2, pen, brush_gp)
+                ellipse.setZValue(200)
+                ellipse.setData(Qt.UserRole, i)
+                ellipse.setData(Qt.UserRole + 1, "gp")
+                ellipse.setData(Qt.UserRole + 2, gp_idx)
+                
+                label = tracked.get(("gp", i, gp_idx))
+                if label:
+                    sel_pen = QPen(QColor("#b45309"), 1, Qt.SolidLine)
+                    sel_pen.setCosmetic(True)
+                    ellipse.setBrush(QBrush(QColor("#fbbf24")))
+                    ellipse.setPen(sel_pen)
+                    
+                    # Add Text Label
+                    txt = self._scene.addSimpleText(label, label_font)
+                    txt.setBrush(QBrush(QColor("#92400e"))) # amber-800
+                    txt.setPos(gx + gp_r*1.5, gy + gp_r*3)
+                    txt.setTransform(transform)
+                    txt.setZValue(210)
+                    self._pickable_items.append(txt)
+
+                self._pickable_items.append(ellipse)
+                self._gp_markers[f"{i}:{gp_idx}"] = ellipse
+
+    def _clear_pickable_points(self):
+        for item in self._pickable_items:
+            self._scene.removeItem(item)
+        self._pickable_items.clear()
+        self._node_markers.clear()
+        self._gp_markers.clear()
 
     # ==================================================================
     # Navigation / Zoom
@@ -879,6 +1051,113 @@ class TerraSimCanvas(QGraphicsView):
     # Temp item management
     # ==================================================================
 
+    def _handle_point_pick(self, item: QGraphicsEllipseItem):
+        """Toggle selection of a node or GP."""
+        etype = item.data(Qt.UserRole + 1)
+        idx = item.data(Qt.UserRole)
+        gp_idx = item.data(Qt.UserRole + 2)
+        
+        current_tracked = self._state.tracked_points
+        
+        # Check if already tracked
+        existing_idx = -1
+        for i, p in enumerate(current_tracked):
+            if p["type"] == etype and p["index"] == idx and p.get("gp_index") == gp_idx:
+                existing_idx = i
+                break
+        
+        if existing_idx >= 0:
+            # Deselect
+            p = current_tracked.pop(existing_idx)
+            self._state.set_tracked_points(current_tracked)
+            self._state.log(f"Deselected {etype.upper()} index {idx}" + (f" GP {gp_idx}" if gp_idx is not None else ""))
+            
+            # Reset color
+            item.setBrush(QBrush(QColor("#f1f5f9") if etype == "node" else QColor("#ecfdf5")))
+            item.setPen(QPen(QColor("#94a3b8"), 0))
+        else:
+            # Select
+            if etype == "node":
+                label = f"{idx}"
+            else:
+                label = f"{idx}/{gp_idx}"
+            
+            new_pt = {
+                "id": f"{etype}_{idx}" + (f"_{gp_idx}" if gp_idx is not None else ""),
+                "type": etype,
+                "index": idx,
+                "gp_index": gp_idx,
+                "label": label,
+                "x": item.rect().center().x(),
+                "y": item.rect().center().y()
+            }
+            current_tracked.append(new_pt)
+            self._state.set_tracked_points(current_tracked)
+            self._state.log(f"Selected {etype.upper()} index {idx}" + (f" GP {gp_idx}" if gp_idx is not None else "") + f" as Point {label}")
+            
+            # Highlights color
+            item.setBrush(QBrush(QColor("#f87171") if etype == "node" else QColor("#fbbf24")))
+            item.setPen(QPen(QColor("#991b1b") if etype == "node" else QColor("#92400e"), 1, Qt.SolidLine))
+
+    def _on_tracked_points_changed(self, points: list):
+        """Handle external changes to tracked points (sync visual state)."""
+        if self._state.tool_mode == "PICK_POINT":
+            self._show_pickable_points()
+        else:
+            self._render_tracked_points()
+
+    def _render_tracked_points(self):
+        """Persistent rendering of tracked points (Compact View)."""
+        self._clear_tracked_markers()
+        
+        # Only show tracked points in MESH tab (Strict Isolation)
+        if self._state.active_tab != "MESH":
+            return
+            
+        points = self._state.tracked_points
+        if not points: return
+        
+        for p in points:
+            etype = p["type"]
+            px, py = p["x"], p["y"]
+            label = p["label"]
+            
+            # Use distinct but compact markers
+            color = QColor("#ef4444") if etype == "node" else QColor("#f59e0b") # red-500 or amber-500
+            pen = QPen(color.darker(150), 1)
+            pen.setCosmetic(True)
+            brush = QBrush(color)
+            
+            r = 0.1 if etype == "node" else 0.07
+            dot = self._scene.addEllipse(px-r, py-r, r*2, r*2, pen, brush)
+            dot.setZValue(210) # Above mesh and unselected points
+            self._tracked_marker_items.append(dot)
+            
+            # Persistent Text Label
+            transform = QTransform()
+            transform.scale(0.015,-0.015)
+            lbl_font = QFont("Inter", 8, QFont.Bold)
+            txt = self._scene.addSimpleText(label, lbl_font)
+            txt.setBrush(QBrush(color.darker(150)))
+            txt.setPos(px + r*1.5, py + r*3)
+            txt.setTransform(transform)
+            txt.setZValue(215)
+            self._tracked_marker_items.append(txt)
+            
+            # Optional: Add small label text
+            # from PySide6.QtWidgets import QGraphicsTextItem
+            # txt = self._scene.addText(label)
+            # txt.setPos(px + r, py - r)
+            # txt.setScale(0.01) # Very small since we are in scene units
+            # self._tracked_marker_items.append(txt)
+
+    def _clear_tracked_markers(self):
+        """Remove persistent tracked point markers."""
+        for item in self._tracked_marker_items:
+            try: self._scene.removeItem(item)
+            except: pass
+        self._tracked_marker_items.clear()
+
     def _clear_temp_items(self):
         """Remove all temporary drawing items from the scene."""
         for item in self._temp_vertex_items:
@@ -888,6 +1167,7 @@ class TerraSimCanvas(QGraphicsView):
         for item in self._temp_line_items:
             self._scene.removeItem(item)
         self._temp_line_items.clear()
+
 
     # ==================================================================
     # Mouse Events
@@ -907,11 +1187,11 @@ class TerraSimCanvas(QGraphicsView):
             event.accept()
             return
 
-        # Map viewport coordinates to scene coordinates (RAW)
-        # We use the raw position for selection to avoid "jumping" when snap is on.
-        raw_scene_pos = self.mapToScene(event.pos())
+        # Map to scene
+        viewport_pos = event.pos()
+        raw_scene_pos = self.mapToScene(viewport_pos)
         
-        # Calculate SNAPPED position for drawing tools (ADD_POLYGON, etc.)
+        # Calculate snapped position for drawing tools (grid snap)
         scene_pos = QPointF(raw_scene_pos)
         settings = self._state.settings
         if settings.get("snap_to_grid", False):
@@ -922,17 +1202,61 @@ class TerraSimCanvas(QGraphicsView):
 
         active_tab = self._state.active_tab
 
+        # ---- PICK_POINT Mode Handling ----
+        if event.button() == Qt.LeftButton and self._state.tool_mode == "PICK_POINT":
+            # REVOLUTIONARY FIX: Distance-based 'Ground Truth' detection.
+            # We ignore graphics-engine hit testing and use pure coordinate math.
+            found_item = None
+            threshold = 0.5  # Max search distance in scene units (geotechnical units)
+            
+            # Check for the closest pickable item in the scene
+            best_dist = threshold**2
+            
+            # We search within a small area to find candidate items
+            search_rect = QRectF(raw_scene_pos.x() - threshold, raw_scene_pos.y() - threshold, threshold*2, threshold*2)
+            candidates = self._scene.items(search_rect)
+            
+            for item in candidates:
+                etype = item.data(Qt.UserRole + 1)
+                if etype in ["node", "gp"]:
+                    # Get the visual center of the marker
+                    # Ellipses are created at (x-r, y-r, 2r, 2r), so their scenePos is usually the center
+                    # if they were added via setPos, but here they are children of scene with rects.
+                    rect = item.boundingRect()
+                    center = item.scenePos() + rect.center()
+                    
+                    dx = center.x() - raw_scene_pos.x()
+                    dy = center.y() - raw_scene_pos.y()
+                    dist_sq = dx*dx + dy*dy
+                    
+                    if dist_sq < best_dist:
+                        best_dist = dist_sq
+                        found_item = item
+            
+            if found_item:
+                self._handle_point_pick(found_item)
+                event.accept()
+                return
+            else:
+                event.accept() 
+                return
+
         # ---- LEFT BUTTON: Tools & Selection ----
         if event.button() == Qt.LeftButton:
             mode = self._state.tool_mode
             
             # Selection logic: allowed in INPUT (SELECT tool) or STAGING tab
             if (active_tab == "INPUT" and mode == "SELECT") or active_tab == "STAGING":
-                click_pos = event.position().toPoint()
+                # Primary: itemAt
+                found_item = self.itemAt(viewport_pos)
+                if found_item and found_item.data(Qt.UserRole + 1) in ["point_load", "line_load", "water_level"]:
+                    self._state.set_selected_entity({"type": found_item.data(Qt.UserRole + 1), "id": found_item.data(Qt.UserRole)})
+                    event.accept()
+                    return
                 
-                # PASS 1: Forgiving Area Search (10px box) ONLY for small items (loads, markers)
-                # This makes points easier to hit without affecting polygon boundaries.
-                for item in self.items(click_pos.x() - 5, click_pos.y() - 5, 10, 10):
+                # Secondary: Forgiving Search
+                search_rect = QRectF(raw_scene_pos.x() - 0.25, raw_scene_pos.y() - 0.25, 0.5, 0.5)
+                for item in self._scene.items(search_rect):
                     etype = item.data(Qt.UserRole + 1)
                     eid = item.data(Qt.UserRole)
                     if etype in ["point_load", "line_load", "water_level"]:
@@ -941,9 +1265,8 @@ class TerraSimCanvas(QGraphicsView):
                         return
                 
                 # PASS 2: MATHEMATICAL PRECISION for Polygons
-                # We do NOT use itemAt, as it can be fuzzy. 
-                # Instead, we check if the scene coordinate is strictly inside the polygon geometry.
-                scene_pos = self.mapToScene(click_pos)
+                # We check if the raw scene coordinate is strictly inside the polygon geometry.
+                scene_pos_val = raw_scene_pos
                 
                 # Iterate in reverse to select the polygon 'on top' if overlapping
                 polygons = self._state.polygons
@@ -1252,7 +1575,9 @@ class TerraSimCanvas(QGraphicsView):
                 "id": str(uuid.uuid4())[:8],
                 "x1": p1["x"], "y1": p1["y"],
                 "x2": pos.x(), "y2": pos.y(),
-                "materialId": mid
+                "materialId": mid,
+                "head_point_index": 0,
+                "head_connection_type": "FIXED"
             }
             self._state.clear_drawing_points()
             self._state.add_embedded_beam(beam)

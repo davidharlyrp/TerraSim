@@ -5,7 +5,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QComboBox, QSlider, QFrame, QPushButton
+    QComboBox, QSlider, QFrame, QPushButton, QCheckBox
 )
 from PySide6.QtCore import Qt
 from core.state import ProjectState, OutputType
@@ -43,8 +43,22 @@ class OutputPanel(QWidget):
                 font-size: 11px;
                 padding: 4px;
                 border: 1px solid #e4e4e7;
-                border-radius: 4px;
                 background: white;
+            }
+            QPushButton#ActionButton {
+                background-color: #3b82f6;
+                color: white;
+                font-weight: 600;
+                border-radius: 4px;
+                padding: 6px;
+                border: none;
+            }
+            QPushButton#ActionButton:hover {
+                background-color: #2563eb;
+            }
+            QPushButton#ActionButton:disabled {
+                background-color: #e4e4e7;
+                color: #a1a1aa;
             }
         """)
         
@@ -114,6 +128,20 @@ class OutputPanel(QWidget):
         
         controls_layout.addWidget(self.scale_container)
 
+        # Show EBR Toggle
+        self.chk_show_ebr = QCheckBox("Show Embedded Beams")
+        self.chk_show_ebr.setStyleSheet("margin-top: 4px; color: #475569;")
+        self.chk_show_ebr.stateChanged.connect(self._on_show_ebr_changed)
+        controls_layout.addWidget(self.chk_show_ebr)
+
+        # Track Data Button
+        controls_layout.addSpacing(10)
+        self.btn_view_track = QPushButton("Track Data Curves")
+        self.btn_view_track.setObjectName("ActionButton")
+        self.btn_view_track.clicked.connect(self._on_view_track_clicked)
+        self.btn_view_track.setEnabled(False) # Default disabled
+        controls_layout.addWidget(self.btn_view_track)
+
         layout.addWidget(controls_container)
         layout.addStretch()
 
@@ -129,3 +157,21 @@ class OutputPanel(QWidget):
         scale = float(value)
         self.scale_val_lbl.setText(f"{scale:.1f}x")
         self._state.set_deformation_scale(scale)
+
+    def _on_show_ebr_changed(self, state):
+        self._state.set_show_ebr(state == Qt.Checked.value)
+
+    def _on_view_track_clicked(self):
+        from ui.track_data_dialog import TrackDataDialog
+        dlg = TrackDataDialog(self.window())
+        dlg.exec()
+
+    def update_action_state(self):
+        """Update button enablement based on current project state."""
+        has_track_data = False
+        results = self._state.solver_results
+        for phase_id, res in results.items():
+            if res.get("track_data"):
+                has_track_data = True
+                break
+        self.btn_view_track.setEnabled(has_track_data)
