@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Optional
 from enum import Enum
 from PySide6.QtCore import QObject, Signal
+from core.logger import TerraSimLogger
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +181,12 @@ class ProjectState(QObject):
         # Mesh generation results (cached response from backend)
         # Matches MeshResponse schema: {"success", "nodes", "elements", ...}
         self._mesh_response: dict | None = None
+        
+        # Persistent Logging Manager
+        from PySide6.QtCore import QSettings
+        _qs = QSettings("DaharEngineer", "TerraSim")
+        _max_logs = int(_qs.value("max_log_files", 5))
+        self._logger = TerraSimLogger.instance(_max_logs)
 
         # Mesh generation settings
         self._mesh_settings: dict = {
@@ -220,7 +227,8 @@ class ProjectState(QObject):
             "max_steps": 100,
             "max_displacement_limit": 10.0,
             "use_arc_length": False,
-            "use_pardiso": True
+            "use_pardiso": True,
+            "max_log_files": 5
         }
         
         # Output settings
@@ -237,9 +245,12 @@ class ProjectState(QObject):
         # Push initial state without emitting UI signals
         self._push_snapshot("Initial State", emit=False)
 
-    def log(self, message: str):
-        """Broadcast a message to the console."""
-        self.log_message.emit(message)
+    def log(self, message: str, emit_signal: bool = True):
+        """Broadcast a message to the console and persist to session log."""
+        if emit_signal:
+            self.log_message.emit(message)
+        if hasattr(self, "_logger"):
+            self._logger.log_console(message)
 
     # =====================================================================
     # Properties (read access) — always return a COPY to prevent
@@ -288,7 +299,8 @@ class ProjectState(QObject):
             "max_steps": 100,
             "max_displacement_limit": 10.0,
             "use_arc_length": False,
-            "use_pardiso": True
+            "use_pardiso": True,
+            "max_log_files": 5
         }
         self.update_settings(defaults)
         self.log("Settings reset to defaults.")
@@ -411,6 +423,10 @@ class ProjectState(QObject):
             "mesh_settings": copy.deepcopy(self._mesh_settings),
             "tracked_points": copy.deepcopy(self._tracked_points)
         }
+        
+        # Persistent Journaling
+        if hasattr(self, "_logger"):
+            self._logger.log_journal(action_name)
         
         # If we are not at the top of the stack, truncate the future
         if self._journal_index < len(self._journal_stack) - 1:

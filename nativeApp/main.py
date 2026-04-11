@@ -74,6 +74,8 @@ if __name__ == "__main__":
     os.environ["QT_COLOR_MODE"] = "light"
 
     app = QApplication(sys.argv)
+    app.setOrganizationName("DaharEngineer")
+    app.setApplicationName("TerraSim")
     
     # Use Fusion style to bypass native Windows overrides
     app.setStyle("Fusion")
@@ -110,4 +112,4 @@ if __name__ == "__main__":
     window = MainWindow(initial_file=initial_file)
     window.show()
     
-    sys.exit(app.exec())
+    sys.exit(app.exec())

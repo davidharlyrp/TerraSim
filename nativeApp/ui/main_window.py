@@ -631,7 +631,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"TerraSim 0.6.0 Beta - {p_name}{file_str}")
 
     def _log(self, message: str):
-        self.console.log(message)
+        """Log a message to the UI console and persistent disk log."""
+        self.state.log(message)
 
     # ==================================================================
     # Mesh Generation (Async via QThread)
@@ -866,6 +867,7 @@ class MainWindow(QMainWindow):
                 self.state.set_phase_results(ph_id, results)
 
             self._solve_worker.log_received.connect(self._solve_dialog.append_log)
+            self._solve_worker.log_received.connect(lambda msg: self.state.log(msg, emit_signal=False))
             self._solve_worker.phase_started.connect(on_started)
             self._solve_worker.step_point_received.connect(self._solve_dialog.update_phase_point)
             self._solve_worker.phase_finished.connect(on_finished)

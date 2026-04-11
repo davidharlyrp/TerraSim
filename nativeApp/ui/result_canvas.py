@@ -241,7 +241,7 @@ class ResultCanvas(QGraphicsView):
                 disp_map[u_get(d, "id") - 1] = (u_get(d, "ux"), u_get(d, "uy"))
 
         # 4. Map Elements to Polygons
-        el_to_poly = { em["element_id"] - 1: em.get("polygon_id") for em in el_mats }
+        self._el_to_poly = { em["element_id"] - 1: em.get("polygon_id") for em in el_mats }
 
         # 5. Populate Nodal Values for Heatmap/Contour
         self._last_nodal_vals = {} 
@@ -260,12 +260,15 @@ class ResultCanvas(QGraphicsView):
                 for eid, gps in stress_gp_map.items():
                     if None in gps: continue
                     elem = elements[eid-1]
+                    pid = self._el_to_poly.get(eid-1)
                     gp_vals = [ self._get_stress_value(g, out_type) for g in gps ]
                     for ni in range(3): 
                         node_idx = elem[ni]
                         val = EXTRAP[ni][0]*gp_vals[0] + EXTRAP[ni][1]*gp_vals[1] + EXTRAP[ni][2]*gp_vals[2]
-                        if node_idx not in self._last_nodal_vals: self._last_nodal_vals[node_idx] = [0.0, 0]
-                        self._last_nodal_vals[node_idx][0] += val; self._last_nodal_vals[node_idx][1] += 1
+                        # For stresses, average ONLY within same polygon to ensure sharp material boundaries
+                        key = (node_idx, pid)
+                        if key not in self._last_nodal_vals: self._last_nodal_vals[key] = [0.0, 0]
+                        self._last_nodal_vals[key][0] += val; self._last_nodal_vals[key][1] += 1
                         nodal_raw.append(val)
             elif "displacements" in phase_results:
                 for d in phase_results["displacements"]:
@@ -275,7 +278,10 @@ class ResultCanvas(QGraphicsView):
                     elif out_type == OutputType.DEFORMED_CONTOUR_UX: val = abs(ux)
                     elif out_type == OutputType.DEFORMED_CONTOUR_UY: val = abs(uy)
                     else: val = 0.0
-                    self._last_nodal_vals[n_idx] = [val, 1]
+                    # For displacements, average GLOBAL (across all polygons) for C0 continuity
+                    key = (n_idx, None)
+                    if key not in self._last_nodal_vals: self._last_nodal_vals[key] = [0.0, 0]
+                    self._last_nodal_vals[key][0] += val; self._last_nodal_vals[key][1] += 1
                     nodal_raw.append(val)
 
         # 6. FACETED COLORING (Manual Element-by-Element)
@@ -305,7 +311,7 @@ class ResultCanvas(QGraphicsView):
             # Group elements by Polygon ID for localized contouring
             poly_to_elements = {}
             for idx, elem in enumerate(elements):
-                pid = el_to_poly.get(idx)
+                pid = self._el_to_poly.get(idx)
                 if pid is None or pid not in active_indices: continue
                 if pid not in poly_to_elements: poly_to_elements[pid] = []
                 poly_to_elements[pid].append(idx)
@@ -329,7 +335,13 @@ class ResultCanvas(QGraphicsView):
                     
                     sub_x = [nodes[i][0] for i in sub_nodes_idx]
                     sub_y = [nodes[i][1] for i in sub_nodes_idx]
-                    sub_v = [ (self._last_nodal_vals.get(i, [0.0, 1])[0]/self._last_nodal_vals.get(i, [0.0, 1])[1]) for i in sub_nodes_idx]
+                    
+                    # Compute nodal values using the current Polygon ID for correctly discontinuous results
+                    sub_v = []
+                    for i in sub_nodes_idx:
+                        # Try polygon-specific key first, fall back to global if displacement
+                        val_raw = self._last_nodal_vals.get((i, pid)) or self._last_nodal_vals.get((i, None), [0.0, 1])
+                        sub_v.append(val_raw[0] / val_raw[1])
                     
                     # Apply deformation to local nodes if needed
                     if scale != 0:
@@ -379,7 +391,7 @@ class ResultCanvas(QGraphicsView):
         mat_overrides = current_phase.get("current_material", {}) if current_phase else {}
         
         for idx, elem in enumerate(elements):
-            pid = el_to_poly.get(idx)
+            pid = self._el_to_poly.get(idx)
             if pid is not None and pid not in active_indices: continue
             if len(elem) < 3: continue
             
@@ -556,9 +568,16 @@ class ResultCanvas(QGraphicsView):
         self._legend_panel.setVisible(is_contour)
         
         if is_contour:
-            self._lbl_min.setText(f"{v_min:.3f}")
-            self._lbl_max.setText(f"{v_max:.3f}")
-            self._lbl_title.setText(str(out_type).replace("OutputType.", "").replace("_", " "))
+            # Determine physical unit
+            unit = ""
+            if "contour" in str(out_type):
+                unit = " m"
+            elif "sigma" in str(out_type) or "pwp" in str(out_type):
+                unit = " kN/m²"
+            
+            self._lbl_min.setText(f"{v_min:.3f}{unit}")
+            self._lbl_max.setText(f"{v_max:.3f}{unit}")
+            self._lbl_title.setText(str(out_type).replace("OutputType.", "").replace("_", " ").upper())
 
     def _create_legend_panel(self):
         """Create a floating semi-transparent legend widget."""
@@ -746,13 +765,17 @@ class ResultCanvas(QGraphicsView):
 
                 w1, w2, w3 = get_barycentric((scene_pos.x(), scene_pos.y()), v1, v2, v3)
                 
-                # Retrieve individual nodal results
-                nv1 = self._get_nodal_value_safe(elem[0])
-                nv2 = self._get_nodal_value_safe(elem[1])
-                nv3 = self._get_nodal_value_safe(elem[2])
+                # Retrieve individual nodal results aware of the current element's polygon
+                pid = self._el_to_poly.get(elements.index(elem))
+                def _get_v_poly(ni, p):
+                    r = self._last_nodal_vals.get((ni, p)) or self._last_nodal_vals.get((ni, None))
+                    return r[0]/r[1] if r else 0.0
+
+                nv1 = _get_v_poly(elem[0], pid)
+                nv2 = _get_v_poly(elem[1], pid)
+                nv3 = _get_v_poly(elem[2], pid)
                 
-                if None not in [nv1, nv2, nv3]:
-                    found_val = w1*nv1 + w2*nv2 + w3*nv3
+                found_val = w1*nv1 + w2*nv2 + w3*nv3
                 break
         
         if found_val is not None:

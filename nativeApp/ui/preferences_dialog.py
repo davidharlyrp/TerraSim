@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QDoubleSpinBox, QSpinBox, QCheckBox, QPushButton, QFrame, QWidget, QGroupBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QStandardPaths
 from core.state import ProjectState
 
 try:
@@ -104,6 +104,24 @@ class PreferencesDialog(QDialog):
         meth_layout.addWidget(self.chk_pardiso)
 
         root_layout.addWidget(meth_group)
+
+        # --- System Maintenance group ---
+        sys_group = QGroupBox("System Maintenance")
+        sys_layout = QVBoxLayout(sys_group)
+        sys_layout.setSpacing(6)
+
+        self.spn_max_logs = self._add_row(sys_layout, "Max Log Files to Keep:", QSpinBox())
+        self.spn_max_logs.setRange(1, 100)
+        self.spn_max_logs.setToolTip("Maximum number of console and journal log files to maintain in AppData.")
+
+        # Path helper note
+        log_path = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation) + "/logs"
+        lbl_path = QLabel(f"Logs saved at: {log_path}")
+        lbl_path.setStyleSheet("color: #94a3b8; font-style: italic; font-size: 10px; margin-top: -2px;")
+        lbl_path.setWordWrap(True)
+        sys_layout.addWidget(lbl_path)
+
+        root_layout.addWidget(sys_group)
         root_layout.addStretch()
 
         # --- Footer ---
@@ -165,6 +183,7 @@ class PreferencesDialog(QDialog):
         self.spn_disp_limit.setValue(s.get("max_displacement_limit", 10.0))
         self.chk_al.setChecked(s.get("use_arc_length", False))
         self.chk_pardiso.setChecked(s.get("use_pardiso", True) and HAS_PARDISO)
+        self.spn_max_logs.setValue(s.get("max_log_files", 5))
 
     def _on_reset_clicked(self):
         self._state.reset_settings_to_default()
@@ -178,7 +197,14 @@ class PreferencesDialog(QDialog):
             "max_steps": self.spn_max_steps.value(),
             "max_displacement_limit": self.spn_disp_limit.value(),
             "use_arc_length": self.chk_al.isChecked(),
-            "use_pardiso": self.chk_pardiso.isChecked()
+            "use_pardiso": self.chk_pardiso.isChecked(),
+            "max_log_files": self.spn_max_logs.value()
         }
         self._state.update_settings(data)
+
+        # Persist global preferences to QSettings
+        from PySide6.QtCore import QSettings
+        qs = QSettings("DaharEngineer", "TerraSim")
+        qs.setValue("max_log_files", data["max_log_files"])
+
         self.accept()
