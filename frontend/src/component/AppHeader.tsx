@@ -1,4 +1,4 @@
-import { Settings, LogOut, Bell, Calendar, ChevronRight, Save, FolderOpen, CloudUpload, CloudDownload, Loader2, Book, MessageSquare, Sun, Moon, X, ChevronDown, BookOpen, Plus, FileDown } from 'lucide-react';
+import { Settings, LogOut, Bell, Calendar, ChevronRight, Save, FolderOpen, CloudUpload, CloudDownload, Loader2, Book, MessageSquare, Sun, Moon, X, ChevronDown, BookOpen, Plus, FileDown, Download } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_VERSION } from '../version';
@@ -154,6 +154,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                 <Link to="/docs" target="_blank" rel="noopener noreferrer">
                                     <Book className={`w-5 h-5 group-hover:opacity-0 group-hover:rotate-45 transition-transform duration-300`} />
                                     <BookOpen className={`absolute w-5 h-5 top-2.5 right-2.5 opacity-0 group-hover:opacity-100 group-hover:rotate-45 transition-transform duration-300`} />
+                                </Link>
+                            </button>
+
+                            <button
+                                className={`relative cursor-pointer p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/50 active:scale-95 transition-all text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 group relative`}
+                                title="Download Desktop Version"
+                            >
+                                <Link to="https://daharengineer.com/software" target="_blank" rel="noopener noreferrer">
+                                    <Download className={`w-5 h-5 group-hover:opacity-0 group-hover:rotate-45 transition-transform duration-300`} />
+                                    <Download className={`absolute w-5 h-5 top-2.5 right-2.5 opacity-0 group-hover:opacity-100 group-hover:rotate-45 transition-transform duration-300`} />
                                 </Link>
                             </button>
 
@@ -451,6 +461,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                                 <MessageSquare className="w-5 h-5 text-blue-600 dark:text-white" />
                                 <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">Feedback</span>
                             </button>
+                            <Link
+                                to="https://daharengineer.com/software"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="buttonlabel">
+                                <Download className="w-5 h-5 text-blue-600 dark:text-white" />
+                                <span className="text-xs font-semibold text-slate-900 dark:text-white leading-none">Download Desktop Version</span>
+                            </Link>
                             <button
                                 onClick={onOpenSettings}
                                 className="buttonlabel">
