@@ -102,6 +102,7 @@ class ProjectState(QObject):
 
     # Output / Visualization Settings
     output_settings_changed = Signal(dict) # {type: OutputType, scale: float}
+    result_visibility_changed = Signal() # emitted when a polygon/load is hidden in RESULT view
     
     # Logging signal
     log_message          = Signal(str)
@@ -228,13 +229,24 @@ class ProjectState(QObject):
             "max_displacement_limit": 10.0,
             "use_arc_length": False,
             "use_pardiso": True,
-            "max_log_files": 5
+            "max_log_files": 5,
+            # Boundary Conditions
+            "bc_x_min": "roller_x",
+            "bc_x_max": "roller_x",
+            "bc_y_min": "fixed",
+            "bc_y_max": "free"
         }
         
         # Output settings
         self.output_type = OutputType.DEFORMED_MESH
         self.deformation_scale = 1.0
         self.show_ebr = False
+        self.show_bc_markers = False
+        
+        # Result Explorer Visibility State (independent of Staging)
+        self.result_hidden_polygons: set[int] = set()
+        self.result_hidden_loads: set[str] = set()
+        self.result_hidden_beams: set[str] = set()
 
         # Temporary drawing buffer — stores vertices while user is drawing
         self._drawing_points: list[dict] = []
@@ -817,7 +829,8 @@ class ProjectState(QObject):
                 "kh": 0.0,
                 "kv": 0.0,
                 "current_material": {str(i): p.get("materialId", "") for i, p in enumerate(self._polygons)},
-                "parent_material": {}
+                "parent_material": {},
+                "load_overrides": {}
             }
             self._phases = [initial]
             self._current_phase_index = 0
@@ -852,10 +865,11 @@ class ProjectState(QObject):
             parent = next((p for p in self._phases if p["id"] == phase["parent_id"]), None)
             if parent:
                 # Use str keys for JSON parity
-                if "parent_material" not in phase:
-                    phase["parent_material"] = dict(parent.get("current_material", {}))
                 if "current_material" not in phase:
                     phase["current_material"] = dict(parent.get("current_material", {}))
+                if "load_overrides" not in phase:
+                    import copy
+                    phase["load_overrides"] = copy.deepcopy(parent.get("load_overrides", {}))
         
         self._phases.append(phase)
         self.phases_changed.emit(self._phases)
@@ -957,6 +971,33 @@ class ProjectState(QObject):
             self.state_changed.emit()
             self._push_snapshot(f"Change Material in Phase: {phase.get('name')}")
 
+    def update_phase_load_override(self, phase_index: int, load_id: str, data: dict):
+        """
+        Manually override point/line load values (fx, fy) in a specific phase.
+        Triggers recursion to child phases.
+        """
+        if 0 <= phase_index < len(self._phases):
+            import copy
+            phase = self._phases[phase_index]
+            
+            overrides = copy.deepcopy(phase.get("load_overrides", {}))
+            current_vals = dict(overrides.get(load_id, {}))
+            current_vals.update(data)
+            overrides[load_id] = current_vals
+            
+            phase["load_overrides"] = overrides
+            self.phases_changed.emit(self._phases)
+            self.state_changed.emit()
+            
+            # Recursive propagation
+            self.propagate_phase_changes(phase["id"])
+            
+            # Console Logging
+            msg = f"[PHASE] Updated Load Override for {load_id} in {phase.get('name')}: {data}"
+            self.log(msg)
+            
+            self._push_snapshot(f"Change Load Override in Phase: {phase.get('name')}")
+
     def propagate_phase_changes(self, parent_id: str):
         """
         Recursive propagation of changes to descendant phases.
@@ -981,42 +1022,37 @@ class ProjectState(QObject):
                 child["active_beam_ids"] = list(parent.get("active_beam_ids", []))
                 child["current_material"] = dict(parent.get("current_material", {}))
                 child["parent_material"] = dict(parent.get("current_material", {}))
+                child["load_overrides"] = copy.deepcopy(parent.get("load_overrides", {}))
             else:
                 # Normal PLASTIC stages inherit material changes to previously inherited items
-                # 1. Update child's parent_material snapshot (always inherits parent's CURRENT)
+                # 1. Update child's parent_material snapshot
                 child["parent_material"] = dict(parent.get("current_material", {}))
                 
-                # 2. Inherit/Override logic for child's CURRENT material
+                # 2. Update child's load_overrides (inheritance logic with deepcopy)
+                parent_overrides = parent.get("load_overrides", {})
+                child_overrides = child.get("load_overrides", {})
+                
+                # We propagate parent overrides to child ONLY if child doesn't have a newer override
+                for lid, lval in parent_overrides.items():
+                    if lid not in child_overrides:
+                        child_overrides[lid] = copy.deepcopy(lval)
+                child["load_overrides"] = child_overrides
+                
+                # 3. Inherit/Override logic for child's CURRENT material
                 new_child_current_mat = {}
                 active_polys = child.get("active_polygon_indices", [])
                 parent_cur_mat = parent.get("current_material", {})
-                parent_old_mat = parent.get("parent_material", {}) # This is slightly risky but matches Frontend logic
                 
                 for poly_idx in active_polys:
                     s_idx = str(poly_idx)
                     if s_idx in old_child_current_mat:
-                        # Logic: if child is currently same as parent's old value, update it.
-                        # This part is complex, for simplicity we'll just check if it's currently inherited.
-                        # We'll use the existing logic from before but refactored.
-                        child_val = old_child_current_mat[s_idx]
-                        if s_idx in parent_cur_mat:
-                             # If child matched parent previously, or we want to force sync
-                             # For now, let's keep it simple: normal stages only sync 
-                             # initial inheritance.
-                             new_child_current_mat[s_idx] = child_val
-                        else:
-                             new_child_current_mat[s_idx] = child_val
-                    else:
-                        if s_idx in parent_cur_mat:
-                            new_child_current_mat[s_idx] = parent_cur_mat[s_idx]
-                        elif poly_idx < len(self._polygons):
-                            new_child_current_mat[s_idx] = self._polygons[poly_idx].get("materialId", "")
+                        new_child_current_mat[s_idx] = old_child_current_mat[s_idx]
+                    elif s_idx in parent_cur_mat:
+                        new_child_current_mat[s_idx] = parent_cur_mat[s_idx]
+                    elif poly_idx < len(self._polygons):
+                        new_child_current_mat[s_idx] = self._polygons[poly_idx].get("materialId", "")
                 
-                # Simplified material inheritance for now:
-                # Most robust way is to re-run the propagate logic I had before.
-                # Actually, the user specifically cares about SAFETY sync.
-                # Let's keep the existing material propagation logic but wrap it.
-                pass 
+                child["current_material"] = new_child_current_mat
 
             # Recursive call
             self.propagate_phase_changes(child["id"])
@@ -1049,6 +1085,16 @@ class ProjectState(QObject):
             })
 
     # ---- Solver Results ----
+
+    def set_show_bc_markers(self, show: bool):
+        if self.show_bc_markers != show:
+            self.show_bc_markers = show
+            self.output_settings_changed.emit({
+                "type": self.output_type,
+                "scale": self.deformation_scale,
+                "show_bc": self.show_bc_markers
+            })
+            self.state_changed.emit()
 
     def set_phase_results(self, phase_id: str, results: dict | None):
         """Store results for a specific phase."""
@@ -1109,7 +1155,7 @@ class ProjectState(QObject):
     # ---- Mesh Response -----------------------------------------------------
 
     def set_mesh_response(self, response: dict | None):
-        """Cache the latest successful mesh response from backend. Clears track points."""
+        """Cache the latest successful mesh response from backend. Clears track points and analysis results."""
         self._mesh_response = response
         
         # Reset tracked points when mesh changes (as they rely on old indices)
@@ -1117,6 +1163,24 @@ class ProjectState(QObject):
             self._tracked_points = []
             self.tracked_points_changed.emit(self._tracked_points)
             self.log("[INFO] Tracked points reset due to new mesh generation.")
+
+        # Clear solver results and phase statuses upon new mesh
+        if response and response.get("success", False):
+            results_cleared = False
+            if hasattr(self, "_solver_results") and self._solver_results:
+                self._solver_results.clear()
+                self.solver_response_changed.emit(self._solver_results)
+                results_cleared = True
+            
+            if hasattr(self, "_phase_statuses") and self._phase_statuses:
+                for ph_id in list(self._phase_statuses.keys()):
+                    if self._phase_statuses[ph_id] != "WAITING":
+                        self._phase_statuses[ph_id] = "WAITING"
+                        self.phase_status_changed.emit(ph_id, "WAITING")
+                        results_cleared = True
+            
+            if results_cleared:
+                self.log("[INFO] Existing analysis results and statuses cleared due to new mesh generation.")
 
         self.mesh_response_changed.emit(response)
         if response:
@@ -1311,8 +1375,9 @@ class ProjectState(QObject):
                 "active_load_ids": ph.get("active_load_ids", []),
                 "reset_displacements": ph.get("reset_displacements", False),
                 # Material maps: Keys must be strings (index) for JSON parity
-                "current_material": {str(k): v for k, v in ph.get("current_material", {}).items()},
-                "parent_material": {str(k): v for k, v in ph.get("parent_material", {}).items()},
+                "current_material": ph.get("current_material", {}),
+                "parent_material": ph.get("parent_material", {}),
+                "load_overrides": ph.get("load_overrides", {}),
                 "active_water_level_id": ph.get("active_water_level_id"),
                 "active_beam_ids": ph.get("active_beam_ids", []),
                 "kh": ph.get("kh", 0.0),
@@ -1341,7 +1406,11 @@ class ProjectState(QObject):
                 "realtime_logging": True,
                 "max_displacement_limit": self._settings.get("max_displacement_limit", 10.0),
                 "use_arc_length": self._settings.get("use_arc_length", False),
-                "use_pardiso": self._settings.get("use_pardiso", True)
+                "use_pardiso": self._settings.get("use_pardiso", True),
+                "bc_x_min": self._settings.get("bc_x_min", "roller_x"),
+                "bc_x_max": self._settings.get("bc_x_max", "roller_x"),
+                "bc_y_min": self._settings.get("bc_y_min", "fixed"),
+                "bc_y_max": self._settings.get("bc_y_max", "free"),
             },
             "water_levels": mesh_helpers.get("water_levels", []),
             "point_loads": mesh_helpers.get("pointLoads", []),
@@ -1401,6 +1470,31 @@ class ProjectState(QObject):
             "outputType": self.output_type.value if hasattr(self.output_type, "value") else str(self.output_type),
             "deformationScale": self.deformation_scale
         }
+
+    # =====================================================================
+    # Result Explorer Visibility Methods
+    # =====================================================================
+
+    def toggle_result_polygon_visibility(self, index: int, visible: bool) -> None:
+        if not visible:
+            self.result_hidden_polygons.add(index)
+        else:
+            self.result_hidden_polygons.discard(index)
+        self.result_visibility_changed.emit()
+
+    def toggle_result_load_visibility(self, load_id: str, visible: bool) -> None:
+        if not visible:
+            self.result_hidden_loads.add(load_id)
+        else:
+            self.result_hidden_loads.discard(load_id)
+        self.result_visibility_changed.emit()
+
+    def toggle_result_beam_visibility(self, beam_id: str, visible: bool) -> None:
+        if not visible:
+            self.result_hidden_beams.add(beam_id)
+        else:
+            self.result_hidden_beams.discard(beam_id)
+        self.result_visibility_changed.emit()
 
     def load_project(self, data: dict) -> None:
         """

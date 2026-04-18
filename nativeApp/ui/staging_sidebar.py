@@ -1,5 +1,6 @@
 import PySide6
 import time
+import copy
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QPushButton, QScrollArea, QMenu, QMessageBox
@@ -402,7 +403,8 @@ class StagingSidebar(QWidget):
             "kh": current.get("kh", 0.0) if current else 0.0,
             "kv": current.get("kv", 0.0) if current else 0.0,
             "current_material": dict(current["current_material"]) if current else {},
-            "parent_material": dict(current["current_material"]) if current else {}
+            "parent_material": dict(current["current_material"]) if current else {},
+            "load_overrides": copy.deepcopy(current.get("load_overrides", {})) if current else {}
         }
 
         self._state.add_phase(new_phase)

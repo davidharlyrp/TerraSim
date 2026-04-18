@@ -9,11 +9,7 @@ This is a drop-in replacement for compute_elements_stresses_numba().
 """
 import numpy as np
 
-try:
-    import terrasim_core
-    _HAS_BATCH_KERNEL = hasattr(terrasim_core, 'compute_stresses_loop')
-except ImportError:
-    _HAS_BATCH_KERNEL = False
+import terrasim_core
 
 
 def compute_elements_stresses_rust(
@@ -45,18 +41,15 @@ def compute_elements_stresses_rust(
     num_dof
 ):
     """
-    Rust-accelerated stress computation using batch kernel.
+    Rust-accelerated stress computation using high-order T15 batch kernel.
     
-    Reshapes B_matrices from (N,3,3,12) to (N*3,36) for Rust,
+    Reshapes B_matrices from (N,9,3,30) to (N*9,90) for Rust,
     then calls terrasim_core.compute_stresses_loop() in a single FFI call.
     """
-    if not _HAS_BATCH_KERNEL:
-        raise RuntimeError("terrasim_core batch kernel not available")
-
     num_active = len(element_nodes_arr)
 
-    # Reshape B_matrices: (N, 3, 3, 12) -> (N*3, 36)
-    B_flat = B_matrices_arr.reshape(num_active * 3, 36)
+    # Reshape B_matrices for T15 high-order elements: (N, 12, 3, 30) -> (N*12, 90)
+    B_flat = B_matrices_arr.reshape(num_active * 12, 90)
 
     # Ensure contiguous arrays with correct dtypes
     element_nodes_c = np.ascontiguousarray(element_nodes_arr, dtype=np.int64)

@@ -7,6 +7,128 @@ from scipy.spatial import cKDTree
 from engine.models import MeshRequest, MeshResponse, BoundaryConditionsResponse, BoundaryCondition, PointLoadAssignment, ElementMaterial
 from engine.error import ErrorCode, get_error_info
 
+
+def _compute_local_size(dist_to_boundary: float, h_min: float, h_max: float, grading_distance: float) -> float:
+    """
+    Compute the desired local element size at a point based on its distance
+    to the nearest boundary/structural line.
+    
+    Uses a smooth power-law grading function that transitions from h_min
+    (at the boundary) to h_max (far from the boundary).
+    
+    Args:
+        dist_to_boundary: Distance from the point to nearest boundary/EBR
+        h_min: Target element size at boundaries (smallest)
+        h_max: Target element size in the interior (largest)
+        grading_distance: Distance over which the transition occurs
+    """
+    if grading_distance < 1e-9:
+        return h_min
+    t = min(1.0, dist_to_boundary / grading_distance)
+    # Use sqrt for smoother grading (slightly slower growth near boundary)
+    t_smooth = math.sqrt(t)
+    return h_min + (h_max - h_min) * t_smooth
+
+
+def _generate_graded_interior_points(
+    polygon_geom: ShapelyPolygon,
+    boundary_sample_pts: np.ndarray,
+    h_min: float,
+    h_max: float,
+    grading_distance: float
+) -> List[Tuple[float, float]]:
+    """
+    Generate interior Steiner points within a polygon sub-region.
+    Points are spaced according to a distance-based size function,
+    creating smooth gradual transitions from refined boundaries to
+    coarser interiors (similar to Plaxis mesh generation).
+    
+    Uses a Poisson-disk-like sampling approach: candidate points on a
+    fine grid are accepted only if they are far enough from all
+    previously accepted points (with "far enough" determined by the
+    local size function).
+    """
+    if polygon_geom.is_empty or polygon_geom.area < 1e-8:
+        return []
+    
+    # Build a KD-tree of boundary sample points for fast distance queries
+    if len(boundary_sample_pts) < 2:
+        return []
+    boundary_tree = cKDTree(boundary_sample_pts)
+    
+    # Get polygon bounding box
+    minx, miny, maxx, maxy = polygon_geom.bounds
+    
+    # Generate candidate grid at spacing of h_min (finest resolution)
+    # Use h_min * 0.7 for candidate spacing to ensure good coverage
+    candidate_spacing = max(h_min * 0.7, 0.05)
+    
+    # Limit total candidates to prevent memory issues on very large models
+    nx = int(math.ceil((maxx - minx) / candidate_spacing)) + 1
+    ny = int(math.ceil((maxy - miny) / candidate_spacing)) + 1
+    MAX_CANDIDATES = 200_000
+    if nx * ny > MAX_CANDIDATES:
+        # Scale up spacing to stay within budget
+        scale = math.sqrt((nx * ny) / MAX_CANDIDATES)
+        candidate_spacing *= scale
+        nx = int(math.ceil((maxx - minx) / candidate_spacing)) + 1
+        ny = int(math.ceil((maxy - miny) / candidate_spacing)) + 1
+    
+    accepted_points = []
+    accepted_arr = []  # For building a KD-tree of accepted points
+    acc_tree = None
+    tree_dirty = True  # Flag to rebuild tree
+    REBUILD_INTERVAL = 50  # Rebuild KD-tree every N new points
+    points_since_rebuild = 0
+    
+    # Prepare shapely polygon for fast contains checks
+    from shapely.prepared import prep
+    prep_poly = prep(polygon_geom)
+    
+    # Scan grid with offset for even rows (hexagonal packing)
+    for iy in range(ny):
+        x_offset = (candidate_spacing * 0.5) if (iy % 2 == 1) else 0.0
+        for ix in range(nx):
+            cx = minx + ix * candidate_spacing + x_offset
+            cy = miny + iy * candidate_spacing
+            
+            # Quick bounds check
+            if cx < minx or cx > maxx or cy < miny or cy > maxy:
+                continue
+            
+            # Check if inside polygon
+            pt = ShapelyPoint(cx, cy)
+            if not prep_poly.contains(pt):
+                continue
+            
+            # Distance to nearest boundary
+            dist_b, _ = boundary_tree.query([cx, cy])
+            
+            # Compute local desired size
+            h_local = _compute_local_size(dist_b, h_min, h_max, grading_distance)
+            
+            # Skip if too close to boundary (boundary discretization handles that)
+            if dist_b < h_min * 0.4:
+                continue
+            
+            # Check distance to previously accepted interior points
+            if accepted_arr:
+                if tree_dirty:
+                    acc_tree = cKDTree(np.array(accepted_arr))
+                    tree_dirty = False
+                dist_a, _ = acc_tree.query([cx, cy])
+                if dist_a < h_local * 0.8:
+                    continue
+            
+            accepted_points.append((cx, cy))
+            accepted_arr.append([cx, cy])
+            points_since_rebuild += 1
+            if points_since_rebuild >= REBUILD_INTERVAL:
+                tree_dirty = True
+                points_since_rebuild = 0
+    
+    return accepted_points
+
 def generate_mesh(request: MeshRequest) -> MeshResponse:
     try:
         # --- 0. Pre-flight Material Validation ---
@@ -273,10 +395,61 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
                         all_segments.append(tuple(sorted((prev_idx, curr_idx))))
                     prev_idx = curr_idx
 
-        # 2. Define Regions (Materials)
+        # --- 2. Generate Graded Interior Steiner Points ---
+        # This is the key improvement: instead of relying solely on max_area,
+        # we seed the interior with points that follow a distance-based size
+        # function, creating smooth Plaxis-like mesh transitions.
+        print("Generating graded interior Steiner points...", flush=True)
+        
+        # Collect ALL boundary sample points (polygon edges + EBR + line loads)
+        # for the global distance field
+        all_boundary_sample_pts = []
+        for v in all_vertices:
+            all_boundary_sample_pts.append(v)
+        
+        # Also densely sample along EBR lines for better distance field
+        if request.embedded_beams:
+            for beam in request.embedded_beams:
+                if len(beam.points) < 2: continue
+                for i in range(len(beam.points) - 1):
+                    p1 = beam.points[i]
+                    p2 = beam.points[i + 1]
+                    seg_len = math.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2)
+                    n_samples = max(2, int(seg_len / 0.1))
+                    for j in range(n_samples + 1):
+                        t = j / n_samples
+                        sx = p1.x + t * (p2.x - p1.x)
+                        sy = p1.y + t * (p2.y - p1.y)
+                        all_boundary_sample_pts.append([sx, sy])
+        
+        boundary_sample_arr = np.array(all_boundary_sample_pts)
+        
+        total_interior_pts = 0
+        for part, meta in refined_polygons_geoms:
+            h_min_local = meta["mesh_size"] / max(meta["refinement"], 0.1)
+            h_max_local = meta["mesh_size"]
+            
+            # Grading distance: how far from boundary the transition takes
+            # Use ~5x the mesh_size for a smooth transition
+            grading_dist = meta["mesh_size"] * 5.0
+            
+            interior_pts = _generate_graded_interior_points(
+                part, boundary_sample_arr,
+                h_min_local, h_max_local, grading_dist
+            )
+            
+            for px, py in interior_pts:
+                get_vertex_index(px, py)
+            
+            total_interior_pts += len(interior_pts)
+        
+        print(f"  Added {total_interior_pts} graded interior points.", flush=True)
+
+        # 3. Define Regions (Materials)
         for part, meta in refined_polygons_geoms:
             inner_pt = part.representative_point()
             rx, ry = round(inner_pt.x, 6), round(inner_pt.y, 6)
+            # Use a generous max_area since Steiner points already control local sizing
             max_area = 0.5 * (meta["mesh_size"] ** 2)
             regions.append([rx, ry, float(meta["original_idx"]), max_area])
 
@@ -320,10 +493,10 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
         }
         
         # 'p' = PSLG
-        # 'q' = Quality mesh (min angle 20)
+        # 'q30' = Quality mesh with min angle 30° (better shaped triangles)
         # 'a' = Area constraints (respect regions max_area)
         # 'A' = Assign attributes to triangles
-        mesh_data = triangle.triangulate(tri_input, 'pqaA')
+        mesh_data = triangle.triangulate(tri_input, 'pq30aA')
         print("Triangulation done.", flush=True)
         
         nodes = mesh_data['vertices'].tolist()
@@ -343,55 +516,73 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
             )
 
 
-        # Transform to 6-node quadratic triangles
-        # Standard ordering: [n1, n2, n3, n12, n23, n31]
-        # where n12 = midpoint of edge 1-2, n23 = midpoint of edge 2-3, n31 = midpoint of edge 3-1
-        # This corresponds to standard numbering: [1, 2, 3, 6, 4, 5]
+        # Transform to 15-node quartic triangles (PLAXIS standard)
+        # 1-2-3 Corners
+        # 4,5,6 on edge 1-2
+        # 7,8,9 on edge 2-3
+        # 10,11,12 on edge 3-1
+        # 13,14,15 interior
         
-        # Track edge midpoints to avoid duplicates: edge (min, max) -> midpoint_node_index
-        edge_midpoint_map = {}
+        # Track edge nodes to avoid duplicates: edge (min, max) -> [node_idx_a, node_idx_b, node_idx_c]
+        # Always stored such that they are ordered from min_node to max_node.
+        edge_nodes_map = {}
         current_node_idx = len(nodes)
         
-        elements = []  # Will store 6-node elements
+        elements = []  
         
         for elem_linear in elements_linear:
             n1, n2, n3 = elem_linear
             
-            # Get or create midpoint nodes for each edge
-            # IMPORTANT: We need to get the midpoint index regardless of sort order
+            def get_edge_nodes(ia, ib):
+                nonlocal current_node_idx
+                e_key = tuple(sorted([ia, ib]))
+                if e_key not in edge_nodes_map:
+                    # Always create nodes from min_node -> max_node (canonical direction)
+                    pa_canon = np.array(nodes[e_key[0]])
+                    pb_canon = np.array(nodes[e_key[1]])
+                    # 3 points at 1/4, 2/4, 3/4 from pa_canon to pb_canon
+                    p1 = (0.75 * pa_canon + 0.25 * pb_canon).tolist()
+                    p2 = (0.50 * pa_canon + 0.50 * pb_canon).tolist()
+                    p3 = (0.25 * pa_canon + 0.75 * pb_canon).tolist()
+                    
+                    indices = [current_node_idx, current_node_idx + 1, current_node_idx + 2]
+                    nodes.extend([p1, p2, p3])
+                    edge_nodes_map[e_key] = indices
+                    current_node_idx += 3
+                
+                # Retrieve and Orient: stored nodes go from e_key[0] to e_key[1] (min to max)
+                res = edge_nodes_map[e_key]
+                if ia == e_key[0]:
+                    # Requested direction matches canonical (min->max): no flip needed
+                    return [res[0], res[1], res[2]]
+                else:
+                    # Requested direction is reversed (max->min): flip the edge nodes
+                    return [res[2], res[1], res[0]]
+
+            # 1. Edge Nodes
+            e12 = get_edge_nodes(n1, n2) # nodes 4,5,6
+            e23 = get_edge_nodes(n2, n3) # nodes 7,8,9
+            e31 = get_edge_nodes(n3, n1) # nodes 10,11,12
             
-            # Edge 1-2 (midpoint goes to position 3 in the 6-node element)
-            edge_12 = tuple(sorted([n1, n2]))
-            if edge_12 not in edge_midpoint_map:
-                p1, p2 = nodes[n1], nodes[n2]
-                mid_12 = [(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0]
-                nodes.append(mid_12)
-                edge_midpoint_map[edge_12] = current_node_idx
-                current_node_idx += 1
-            n12 = edge_midpoint_map[edge_12]
+            # 2. Interior Nodes (13, 14, 15)
+            # Typically at (1/2, 1/4, 1/4), (1/4, 1/2, 1/4), (1/4, 1/4, 1/2)
+            p1, p2, p3 = np.array(nodes[n1]), np.array(nodes[n2]), np.array(nodes[n3])
+            i1 = (0.50 * p1 + 0.25 * p2 + 0.25 * p3).tolist()
+            i2 = (0.25 * p1 + 0.50 * p2 + 0.25 * p3).tolist()
+            i3 = (0.25 * p1 + 0.25 * p2 + 0.50 * p3).tolist()
             
-            # Edge 2-3 (midpoint goes to position 4 in the 6-node element)
-            edge_23 = tuple(sorted([n2, n3]))
-            if edge_23 not in edge_midpoint_map:
-                p2, p3 = nodes[n2], nodes[n3]
-                mid_23 = [(p2[0] + p3[0]) / 2.0, (p2[1] + p3[1]) / 2.0]
-                nodes.append(mid_23)
-                edge_midpoint_map[edge_23] = current_node_idx
-                current_node_idx += 1
-            n23 = edge_midpoint_map[edge_23]
+            in13, in14, in15 = current_node_idx, current_node_idx+1, current_node_idx+2
+            nodes.extend([i1, i2, i3])
+            current_node_idx += 3
             
-            # Edge 3-1 (midpoint goes to position 5 in the 6-node element)
-            edge_31 = tuple(sorted([n3, n1]))
-            if edge_31 not in edge_midpoint_map:
-                p3, p1 = nodes[n3], nodes[n1]
-                mid_31 = [(p3[0] + p1[0]) / 2.0, (p3[1] + p1[1]) / 2.0]
-                nodes.append(mid_31)
-                edge_midpoint_map[edge_31] = current_node_idx
-                current_node_idx += 1
-            n31 = edge_midpoint_map[edge_31]
-            
-            # Create 6-node element with standard ordering: [n1, n2, n3, n12, n23, n31]
-            elements.append([n1, n2, n3, n12, n23, n31])
+            # 3. Assemble Element (PLAXIS 15-node order)
+            elements.append([
+                n1, n2, n3,             # 1, 2, 3
+                e12[0], e12[1], e12[2], # 4, 5, 6
+                e23[0], e23[1], e23[2], # 7, 8, 9
+                e31[0], e31[1], e31[2], # 10, 11, 12
+                in13, in14, in15        # 13, 14, 15
+            ])
 
 
 
@@ -425,24 +616,11 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
         min_y, max_y = min(ys), max(ys)
         
         tol = 1e-3
+        print(f"[MESH] Identifying boundary nodes (tol={tol}). Model bounds: X=[{min_x}, {max_x}], Y=[{min_y}, {max_y}]")
         
+        # Boundary Conditions - Hardcode removed. BCs are now dynamic in the Solver.
         full_fixed = []
         normal_fixed = []
-        
-        for i, node in enumerate(nodes):
-            nx, ny = node[0], node[1]
-            
-            is_min_y = abs(ny - min_y) < tol
-            is_min_x = abs(nx - min_x) < tol
-            is_max_x = abs(nx - max_x) < tol
-            
-            # Bottom -> Full Fixed
-            if is_min_y:
-                full_fixed.append(BoundaryCondition(node=i)) # Send 0-based
-            # Sides -> Normal Fixed (Roller)
-            elif is_min_x or is_max_x:
-                normal_fixed.append(BoundaryCondition(node=i)) # Send 0-based
-        
         # C. Point Loads
         point_load_assigns = []
         if request.pointLoads and nodes:
@@ -479,16 +657,17 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
                 for el_idx, el in enumerate(elements):
                     # Check each of the 3 main edges for quadratic triangle: (n1-n2), (n2-n3), (n3-n1)
                     # Node indices are: n1=el[0], n2=el[1], n3=el[2], n12=el[3], n23=el[4], n31=el[5]
+                    # T15 Elements have 5 nodes per edge: 2 corners + 3 midsides
                     edges = [
-                        (el[0], el[1], el[3]), # Edge 1-2, midpoint n12
-                        (el[1], el[2], el[4]), # Edge 2-3, midpoint n23
-                        (el[2], el[0], el[5])  # Edge 3-1, midpoint n31
+                        (el[0], el[1], [el[3], el[4], el[5]]), # Edge 1-2
+                        (el[1], el[2], [el[6], el[7], el[8]]), # Edge 2-3
+                        (el[2], el[0], [el[9], el[10], el[11]])# Edge 3-1
                     ]
                     
-                    for na, nb, nm in edges:
-                        pa, pb, pm = node_arr[na], node_arr[nb], node_arr[nm]
+                    for na, nb, mids in edges:
+                        pa, pb = node_arr[na], node_arr[nb]
+                        pm_list = [node_arr[m] for m in mids]
                         
-                        # Check if both endpoints and midpoint lie on the line segment
                         def is_on_segment(p, p1, p2, tol=1e-3):
                             v = p - p1
                             proj = np.dot(v, line_unit)
@@ -496,11 +675,13 @@ def generate_mesh(request: MeshRequest) -> MeshResponse:
                             dist = np.linalg.norm(v - proj * line_unit)
                             return dist < tol
                         
-                        if is_on_segment(pa, p1, p2) and is_on_segment(pb, p1, p2) and is_on_segment(pm, p1, p2):
+                        # Verify all 5 nodes are on segment
+                        if is_on_segment(pa, p1, p2) and is_on_segment(pb, p1, p2) and all(is_on_segment(pm, p1, p2) for pm in pm_list):
+                            edge_node_ids = [int(na)+1, int(nb)+1] + [int(m)+1 for m in mids]
                             line_load_assigns.append(LineLoadAssignment(
                                 line_load_id=ll.id,
                                 element_id=el_idx + 1,
-                                edge_nodes=[int(na)+1, int(nb)+1, int(nm)+1]
+                                edge_nodes=edge_node_ids
                             ))
 
         # E. Embedded Beams

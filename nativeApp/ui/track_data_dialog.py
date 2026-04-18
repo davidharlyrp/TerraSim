@@ -187,15 +187,30 @@ class TrackDataDialog(QDialog):
                     
                     # 3. Principal Stresses for GP
                     if "sig_xx" in entry and "sig_yy" in entry:
+                        pwp_total = entry.get("pwp_total", 0.0)
+                        
                         sx = entry["sig_xx"]
                         sy = entry["sig_yy"]
                         txy = entry.get("sig_xy", 0)
+                        sz = entry.get("sig_zz", 0)
                         
                         center = (sx + sy) / 2.0
                         radius = math.sqrt(((sx - sy) / 2.0)**2 + txy**2)
                         entry["sigma_1"] = center + radius
                         entry["sigma_3"] = center - radius
                         entry["q_von_mises"] = abs(sx - sy)
+                        
+                        # Effective Stresses
+                        sx_eff = sx - pwp_total
+                        sy_eff = sy - pwp_total
+                        sz_eff = sz - pwp_total
+                        entry["sig_xx_eff"] = sx_eff
+                        entry["sig_yy_eff"] = sy_eff
+                        entry["sig_zz_eff"] = sz_eff
+                        
+                        center_eff = (sx_eff + sy_eff) / 2.0
+                        entry["sigma_1_eff"] = center_eff + radius
+                        entry["sigma_3_eff"] = center_eff - radius
                     
                     phase_steps.append(entry)
                 
@@ -316,17 +331,25 @@ class TrackDataDialog(QDialog):
                         point_type = p.get("type", "node")
                         break
                 
-                # Filter categories
-                general = ["step_global", "step_local", "m_stage"]
-                node_only = [
+                # Field categories
+                # Categories for grouping in UI
+                categories = {
+                    "--- PROJECT DATA ---": ["step_global", "step_local", "m_stage", "force_x", "force_y"],
+                    "--- POINT DATA ---": []
+                }
+                
+                # Assemble Point Data based on type
+                categories["--- POINT DATA ---"].extend([
                     "ux_local", "uy_local", "displacement_local_total",
                     "ux_global", "uy_global", "displacement_global_total"
-                ]
-                gp_only = [
-                    "sig_xx", "sig_yy", "sig_xy", "sig_zz", "sigma_1", "sigma_3", 
-                    "pwp_total", "pwp_excess", "pwp_steady",
-                    "eps_xx", "eps_yy", "eps_xy"
-                ]
+                ])
+                if point_type == "gp":
+                    categories["--- POINT DATA ---"].extend([
+                        "sig_xx", "sig_yy", "sig_xy", "sig_zz", "sigma_1", "sigma_3", 
+                        "sig_xx_eff", "sig_yy_eff", "sig_zz_eff", "sigma_1_eff", "sigma_3_eff",
+                        "pwp_total", "pwp_excess", "pwp_steady",
+                        "eps_xx", "eps_yy", "eps_xy"
+                    ])
                 
                 # Field to Label map with Units
                 units = {
@@ -334,54 +357,68 @@ class TrackDataDialog(QDialog):
                     "ux_global": "(m)", "uy_global": "(m)", "displacement_global_total": "(m)",
                     "sig_xx": "(kPa)", "sig_yy": "(kPa)", "sig_xy": "(kPa)", "sig_zz": "(kPa)",
                     "sigma_1": "(kPa)", "sigma_3": "(kPa)",
+                    "sig_xx_eff": "(kPa)", "sig_yy_eff": "(kPa)", "sig_zz_eff": "(kPa)",
+                    "sigma_1_eff": "(kPa)", "sigma_3_eff": "(kPa)",
                     "pwp_total": "(kPa)", "pwp_excess": "(kPa)", "pwp_steady": "(kPa)",
-                    "m_stage": "(-)"
+                    "m_stage": "(-)",
+                    "force_x": "(kN)", "force_y": "(kN)"
                 }
                 
+                # Prettify map
+                pretty = {
+                    "step_global": "Step (Global)",
+                    "step_local": "Step (Local)",
+                    "m_stage": "Multiplier (Mstage)",
+                    "force_x": "Total Applied Force X",
+                    "force_y": "Total Applied Force Y",
+                    "ux_local": "Local Displacement Ux",
+                    "uy_local": "Local Displacement Uy",
+                    "displacement_local_total": "Local Total Displacement",
+                    "ux_global": "Global Displacement Ux",
+                    "uy_global": "Global Displacement Uy",
+                    "displacement_global_total": "Global Total Displacement",
+                    "sig_xx": "Total Stress Sig_xx",
+                    "sig_yy": "Total Stress Sig_yy",
+                    "sig_zz": "Total Stress Sig_zz",
+                    "sigma_1": "Principal Total Stress Sigma 1",
+                    "sigma_3": "Principal Total Stress Sigma 3",
+                    "sig_xx_eff": "Effective Stress Sig_xx'",
+                    "sig_yy_eff": "Effective Stress Sig_yy'",
+                    "sig_zz_eff": "Effective Stress Sig_zz'",
+                    "sigma_1_eff": "Principal Effective Stress Sigma 1'",
+                    "sigma_3_eff": "Principal Effective Stress Sigma 3'",
+                    "pwp_total": "Total Pore Pressure",
+                    "pwp_excess": "Excess Pore Pressure",
+                    "pwp_steady": "Hydrostatic/Steady PWP"
+                }
+
                 # Get common keys from first phase of first point
                 first_phase_id = list(self._data_cache[first_pid].keys())[0]
                 all_keys = self._data_cache[first_pid][first_phase_id][0].keys()
                 
-                fields = []
-                for k in general:
-                    if k in all_keys: fields.append(k)
-                for k in node_only:
-                    if k in all_keys: fields.append(k)
-                if point_type == "gp":
-                    for k in gp_only:
-                        if k in all_keys: fields.append(k)
-                
-                for f in fields:
-                    label = f.replace("_", " ").title()
-                    # Prettify common geotechnical terms
-                    if "ux_local" in f: label = "Local Displacement Ux"
-                    elif "uy_local" in f: label = "Local Displacement Uy"
-                    elif "displacement_local_total" in f: label = "Local Total Displacement"
-                    elif "ux_global" in f: label = "Global Displacement Ux"
-                    elif "uy_global" in f: label = "Global Displacement Uy"
-                    elif "displacement_global_total" in f: label = "Global Total Displacement"
-                    elif f == "m_stage": label = "Multiplier (Mstage)"
-                    elif f == "sigma_1": label = "Sigma 1 (Major)"
-                    elif f == "sigma_3": label = "Sigma 3 (Minor)"
-                    elif f == "pwp_total": label = "Total PWP"
-                    elif f == "pwp_excess": label = "Excess PWP"
-                    elif f == "pwp_steady": label = "Steady PWP"
-                    
-                    # Append unit
-                    u = units.get(f, "")
-                    if u: label += f" {u}"
-                    
-                    self.x_axis_combo.addItem(label, f)
-                    self.y_axis_combo.addItem(label, f)
+                for combo in [self.x_axis_combo, self.y_axis_combo]:
+                    combo.clear()
+                    for cat_name, items in categories.items():
+                        # Add separator label
+                        combo.addItem(cat_name, None)
+                        # Make it non-selectable or just grayed out if possible, 
+                        # but simple way is to check it in indexChanged.
+                        # For now, just add items with indentation.
+                        for f in items:
+                            if f in all_keys or f in ["step_global", "step_local"]: # Some are calculated
+                                label = pretty.get(f, f.replace("_", " ").title())
+                                u = units.get(f, "")
+                                if u: label += f" {u}"
+                                combo.addItem(f"  {label}", f)
                 
                 # Defaults
-                def_x = self.x_axis_combo.findData("step_global")
+                def_x = self.x_axis_combo.findData("force_y")
+                if def_x < 0: def_x = self.x_axis_combo.findData("step_global")
                 if def_x >= 0: self.x_axis_combo.setCurrentIndex(def_x)
                 
                 y_target = "displacement_global_total" if point_type == "node" else "sigma_1"
                 def_y = self.y_axis_combo.findData(y_target)
-                if def_y < 0: def_y = self.y_axis_combo.findData("ux_global") 
-                if def_y < 0: def_y = self.y_axis_combo.findData("ux") # Legacy fallback
+                if def_y < 0: def_y = self.y_axis_combo.findData("uy_global") 
                 if def_y >= 0: self.y_axis_combo.setCurrentIndex(def_y)
 
         # Populate Phases

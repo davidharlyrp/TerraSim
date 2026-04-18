@@ -128,22 +128,32 @@ class OutputPanel(QWidget):
         
         controls_layout.addWidget(self.scale_container)
 
-        # Show EBR Toggle
-        self.chk_show_ebr = QCheckBox("Show Embedded Beams")
-        self.chk_show_ebr.setStyleSheet("margin-top: 4px; color: #475569;")
-        self.chk_show_ebr.stateChanged.connect(self._on_show_ebr_changed)
-        controls_layout.addWidget(self.chk_show_ebr)
+        # Show EBR Toggle removed explicitly to use Result Explorer instead
 
-        # Track Data Button
+        # Display Options
+        display_label = QLabel("Display Options")
+        display_label.setStyleSheet("margin-top: 10px; font-weight: 600;")
+        controls_layout.addWidget(display_label)
+
+        self.chk_show_bc = QCheckBox("Show Boundary Conditions")
+        self.chk_show_bc.setStyleSheet("font-size: 11px;")
+        self.chk_show_bc.setChecked(self._state.show_bc_markers)
+        self.chk_show_bc.toggled.connect(self._on_show_bc_toggled)
+        controls_layout.addWidget(self.chk_show_bc)
+
+        # 4. View Control Button (Track Curves)
         controls_layout.addSpacing(10)
         self.btn_view_track = QPushButton("Track Data Curves")
         self.btn_view_track.setObjectName("ActionButton")
         self.btn_view_track.clicked.connect(self._on_view_track_clicked)
-        self.btn_view_track.setEnabled(False) # Default disabled
+        self.btn_view_track.setEnabled(False) # Initial state
         controls_layout.addWidget(self.btn_view_track)
 
         layout.addWidget(controls_container)
         layout.addStretch()
+
+    def _on_show_bc_toggled(self, checked):
+        self._state.set_show_bc_markers(checked)
 
     def _on_type_changed(self, index):
         out_type = self.type_combo.currentData()
@@ -158,8 +168,7 @@ class OutputPanel(QWidget):
         self.scale_val_lbl.setText(f"{scale:.1f}x")
         self._state.set_deformation_scale(scale)
 
-    def _on_show_ebr_changed(self, state):
-        self._state.set_show_ebr(state == Qt.Checked.value)
+
 
     def _on_view_track_clicked(self):
         from ui.track_data_dialog import TrackDataDialog

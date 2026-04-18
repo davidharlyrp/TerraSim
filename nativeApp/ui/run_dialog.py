@@ -176,8 +176,8 @@ class SolveRunDialog(QDialog):
         self.setWindowTitle("Calculation")
         self.resize(800, 500)
         
-        # UI Policy
-        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
+        # UI Policy: Remove close button, keep minimize/maximize
+        self.setWindowFlags((self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint) & ~Qt.WindowCloseButtonHint)
         
         self.phases = phases
         self.completed_count = 0

@@ -82,7 +82,7 @@ SAMPLE_FOUNDATION = {
     "waterLevels": [
         {"id": "wl_default", "name": "Initial Water Level", "points": [{"x": -10, "y": 2}, {"x": 10, "y": 2}]},
     ],
-    "meshSettings": {"mesh_size": 0.5, "boundary_refinement_factor": 0.5},
+    "meshSettings": {"mesh_size": 0.8, "boundary_refinement_factor": 0.5},
     "phases": [
         {
             "id": "f_ph0", "name": "Initial (K0 Procedure)", "phase_type": "K0_PROCEDURE", "parent_id": None,
@@ -162,7 +162,7 @@ SAMPLE_RETAINING_WALL = {
     "waterLevels": [
         {"id": "wl_1", "name": "Phreatic Surface", "points": [{"x": -35, "y": 6}, {"x": -1, "y": 6}, {"x": 12, "y": -2}, {"x": 35, "y": -2.5}]},
     ],
-    "meshSettings": {"mesh_size": 1.1, "boundary_refinement_factor": 1.0},
+    "meshSettings": {"mesh_size": 1.5, "boundary_refinement_factor": 1.0},
     "phases": [
         {
             "id": "rw_ph0", "name": "Initial (K0 Procedure)", "phase_type": "K0_PROCEDURE", "parent_id": None,

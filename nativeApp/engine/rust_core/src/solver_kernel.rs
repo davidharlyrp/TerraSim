@@ -1,37 +1,32 @@
 /// Full stress computation loop — the performance-critical kernel.
 ///
-/// This replaces the entire `compute_elements_stresses_numba` Python/Numba function
-/// with a single Rust call, eliminating all Python-Rust FFI overhead per element.
-///
-/// The loop iterates over all active elements and their 3 Gauss points,
-/// computing strain, trial stress, return mapping, and internal forces.
+/// This replaces the entire element stress computation loop in Rust.
+/// Updated for T15 high-order elements (15 nodes, 12 Gauss points).
 
 use numpy::ndarray::{Array1, Array2, Array3};
 use numpy::{PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
 
-use crate::elements::t6;
+use crate::elements::t15;
 use crate::material_models::hoek_brown;
 use crate::material_models::mohr_coulomb;
 
 /// Full stress computation loop exposed to Python via PyO3.
-///
-/// This is a drop-in replacement for `compute_elements_stresses_numba`.
-/// All array shapes match the Python/Numba version exactly.
+/// Updated for T15 high-order topology.
 #[pyfunction]
 #[pyo3(name = "compute_stresses_loop")]
 pub fn compute_stresses_loop_py<'py>(
     py: Python<'py>,
-    element_nodes: PyReadonlyArray2<'py, i64>,      // (N, 6)
+    element_nodes: PyReadonlyArray2<'py, i64>,      // (N, 15)
     total_u: PyReadonlyArray1<'py, f64>,             // (num_dof,)
-    step_start_stress: PyReadonlyArray3<'py, f64>,   // (N, 3, 3)
-    step_start_strain: PyReadonlyArray3<'py, f64>,   // (N, 3, 3)
-    step_start_pwp: PyReadonlyArray2<'py, f64>,      // (N, 3)
-    b_matrices: PyReadonlyArray2<'py, f64>,          // (N*3, 36) flattened B per GP
-    det_j: PyReadonlyArray2<'py, f64>,               // (N, 3)
-    weights: PyReadonlyArray1<'py, f64>,             // (3,)
+    step_start_stress: PyReadonlyArray3<'py, f64>,   // (N, 12, 3)
+    step_start_strain: PyReadonlyArray3<'py, f64>,   // (N, 12, 3)
+    step_start_pwp: PyReadonlyArray2<'py, f64>,      // (N, 12)
+    b_matrices: PyReadonlyArray2<'py, f64>,          // (N*12, 90) flattened B per GP
+    det_j: PyReadonlyArray2<'py, f64>,               // (N, 12)
+    weights: PyReadonlyArray1<'py, f64>,             // (12,)
     d_elastic: PyReadonlyArray3<'py, f64>,           // (N, 3, 3)
-    pwp_static: PyReadonlyArray2<'py, f64>,          // (N, 3)
+    pwp_static: PyReadonlyArray2<'py, f64>,          // (N, 12)
     mat_drainage: PyReadonlyArray1<'py, i64>,        // (N,)
     mat_model: PyReadonlyArray1<'py, i64>,           // (N,)
     mat_c: PyReadonlyArray1<'py, f64>,               // (N,)
@@ -81,25 +76,25 @@ pub fn compute_stresses_loop_py<'py>(
     let num_active = elem_nodes.shape()[0];
 
     let mut f_int = Array1::<f64>::zeros(num_dof);
-    let mut new_stresses = Array3::<f64>::zeros((num_active, 3, 3));
-    let mut new_yield = Array2::<bool>::default((num_active, 3));
-    let mut new_strain = Array3::<f64>::zeros((num_active, 3, 3));
-    let mut new_pwp_excess = Array2::<f64>::zeros((num_active, 3));
+    let mut new_stresses = Array3::<f64>::zeros((num_active, 12, 3));
+    let mut new_yield = Array2::<bool>::default((num_active, 12));
+    let mut new_strain = Array3::<f64>::zeros((num_active, 12, 3));
+    let mut new_pwp_excess = Array2::<f64>::zeros((num_active, 12));
 
     for i in 0..num_active {
-        // Gather element DOFs
-        let mut u_el = [0.0f64; 12];
-        for li in 0..6 {
+        // Gather T15 element DOFs (15 nodes * 2 DOFs)
+        let mut u_el = [0.0f64; 30];
+        for li in 0..15 {
             let n_idx = elem_nodes[[i, li]] as usize;
             u_el[li * 2] = u[n_idx * 3];
             u_el[li * 2 + 1] = u[n_idx * 3 + 1];
         }
 
-        let mut f_int_el = [0.0f64; 12];
+        let mut f_int_el = [0.0f64; 30];
         let dtype = drainage[i];
         let mmodel = model[i];
 
-        // D_elastic for this element (row-major flat)
+        // D_elastic for this element (flat 3x3)
         let mut d_flat = [0.0f64; 9];
         for r in 0..3 {
             for c in 0..3 {
@@ -118,11 +113,11 @@ pub fn compute_stresses_loop_py<'py>(
         let a_val = a_arr[i];
         let penalty = pen_arr[i];
 
-        for gp_idx in 0..3usize {
-            // B matrix for this GP (stored in flat array)
-            let b_row = i * 3 + gp_idx;
-            let mut b_gp = [0.0f64; 36];
-            for k in 0..36 {
+        // 12-point Gauss loop
+        for gp_idx in 0..12usize {
+            let b_row = i * 12 + gp_idx;
+            let mut b_gp = [0.0f64; 90]; // 3 x 30
+            for k in 0..90 {
                 b_gp[k] = b_mats_flat[[b_row, k]];
             }
 
@@ -131,7 +126,7 @@ pub fn compute_stresses_loop_py<'py>(
             let p_static = pwp_s_arr[[i, gp_idx]];
 
             // epsilon_total = B @ u_el
-            let epsilon_total = t6::b_times_u(&b_gp, &u_el);
+            let epsilon_total = t15::b_times_u(&b_gp, &u_el);
             let start_str = [
                 start_strain[[i, gp_idx, 0]],
                 start_strain[[i, gp_idx, 1]],
@@ -302,16 +297,16 @@ pub fn compute_stresses_loop_py<'py>(
             new_strain[[i, gp_idx, 2]] = epsilon_total[2];
             new_pwp_excess[[i, gp_idx]] = p_exc_new;
 
-            // f_int_el += B^T @ sig_new * det_J * weight
-            let bt_sig = t6::bt_times_sigma(&b_gp, &sig_new);
+            // BT @ sig_new
+            let bt_sig = t15::bt_times_sigma(&b_gp, &sig_new);
             let scale = det_j_val * weight;
-            for k in 0..12 {
+            for k in 0..30 {
                 f_int_el[k] += bt_sig[k] * scale;
             }
         }
 
-        // Scatter to global F_int
-        for li in 0..6 {
+        // Scatter to global F_int (15 nodes)
+        for li in 0..15 {
             let gi = elem_nodes[[i, li]] as usize;
             f_int[gi * 3] += f_int_el[li * 2];
             f_int[gi * 3 + 1] += f_int_el[li * 2 + 1];
@@ -327,17 +322,17 @@ pub fn compute_stresses_loop_py<'py>(
     ))
 }
 
-/// Stiffness assembly kernel — computes K_values for all elements.
+/// Stiffness assembly kernel — computes K_values for all T15 elements.
 ///
-/// Returns flattened array of length N*144.
+/// Returns flattened array of length N*900 ($30 \times 30$).
 #[pyfunction]
 #[pyo3(name = "assemble_stiffness_loop")]
 pub fn assemble_stiffness_loop_py<'py>(
     py: Python<'py>,
-    d_tangent: PyReadonlyArray2<'py, f64>,  // (N*3, 9) flattened D per GP
-    b_matrices: PyReadonlyArray2<'py, f64>, // (N*3, 36) flattened B per GP
-    det_j: PyReadonlyArray2<'py, f64>,      // (N, 3)
-    weights: PyReadonlyArray1<'py, f64>,    // (3,)
+    d_tangent: PyReadonlyArray2<'py, f64>,  // (N*12, 9) flattened D per GP
+    b_matrices: PyReadonlyArray2<'py, f64>, // (N*12, 90) flattened B per GP
+    det_j: PyReadonlyArray2<'py, f64>,      // (N, 12)
+    weights: PyReadonlyArray1<'py, f64>,    // (12,)
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let d_arr = d_tangent.as_array();
     let b_arr = b_matrices.as_array();
@@ -345,15 +340,15 @@ pub fn assemble_stiffness_loop_py<'py>(
     let w_arr = weights.as_array();
 
     let num_active = det_j_arr.shape()[0];
-    let mut k_values = Array1::<f64>::zeros(num_active * 144);
+    let mut k_values = Array1::<f64>::zeros(num_active * 900);
 
     for i in 0..num_active {
-        let mut k_el = [0.0f64; 144];
-        for gp_idx in 0..3usize {
-            let row = i * 3 + gp_idx;
+        let mut k_el = [0.0f64; 900];
+        for gp_idx in 0..12usize {
+            let row = i * 12 + gp_idx;
 
-            let mut b = [0.0f64; 36];
-            for k in 0..36 {
+            let mut b = [0.0f64; 90];
+            for k in 0..90 {
                 b[k] = b_arr[[row, k]];
             }
             let mut d = [0.0f64; 9];
@@ -361,14 +356,14 @@ pub fn assemble_stiffness_loop_py<'py>(
                 d[k] = d_arr[[row, k]];
             }
 
-            let contrib = t6::btdb_contribution(&b, &d, det_j_arr[[i, gp_idx]], w_arr[gp_idx]);
-            for k in 0..144 {
+            let contrib = t15::btdb_contribution(&b, &d, det_j_arr[[i, gp_idx]], w_arr[gp_idx]);
+            for k in 0..900 {
                 k_el[k] += contrib[k];
             }
         }
 
-        let offset = i * 144;
-        for k in 0..144 {
+        let offset = i * 900;
+        for k in 0..900 {
             k_values[offset + k] = k_el[k];
         }
     }
@@ -376,7 +371,6 @@ pub fn assemble_stiffness_loop_py<'py>(
     Ok(PyArray1::from_owned_array(py, k_values))
 }
 
-/// D @ eps helper (3x3 matrix times 3-vector)
 #[inline]
 fn d_times_eps_fn(d: &[f64; 9], eps: &[f64; 3]) -> [f64; 3] {
     [

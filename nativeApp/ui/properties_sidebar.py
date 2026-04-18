@@ -70,6 +70,8 @@ class PropertiesSidebar(QWidget):
         self._state.beam_materials_changed.connect(self._sync_beam_materials)
         self._state.polygons_changed.connect(self._sync_current_polygon)
         self._state.embedded_beams_changed.connect(self._sync_current_beam)
+        self._state.current_phase_changed.connect(lambda _: self._on_selection_changed(self._current_selection))
+        self._state.phases_changed.connect(lambda _: self._on_selection_changed(self._current_selection))
         
         # Initial Clear
         self._on_selection_changed(None)
@@ -390,10 +392,23 @@ class PropertiesSidebar(QWidget):
         if not target: return
         self._is_updating = True
         self.header_lbl.setText(f"Point Load #{lid}")
+        
+        is_staging = (self._state.active_tab == "STAGING")
+        current_phase = self._state.current_phase
+        
+        fx, fy = target['fx'], target['fy']
+        if is_staging and current_phase:
+            overrides = current_phase.get("load_overrides", {})
+            if lid in overrides:
+                ov = overrides[lid]
+                fx = ov.get("fx", fx)
+                fy = ov.get("fy", fy)
+                self.header_lbl.setText(f"Point Load #{lid} (Phase Override)")
+
         self.point_xy_table.setItem(0, 0, QTableWidgetItem(f"{target['x']:.3f}"))
         self.point_xy_table.setItem(0, 1, QTableWidgetItem(f"{target['y']:.3f}"))
-        self.point_f_table.setItem(0, 0, QTableWidgetItem(f"{target['fx']:.2f}"))
-        self.point_f_table.setItem(0, 1, QTableWidgetItem(f"{target['fy']:.2f}"))
+        self.point_f_table.setItem(0, 0, QTableWidgetItem(f"{fx:.2f}"))
+        self.point_f_table.setItem(0, 1, QTableWidgetItem(f"{fy:.2f}"))
         self._is_updating = False
 
     def _on_point_data_changed(self, item):
@@ -401,18 +416,33 @@ class PropertiesSidebar(QWidget):
         try:
             lid = self._current_selection.get("id")
             data = {
-                "x": float(self.point_xy_table.item(0,0).text()),
-                "y": float(self.point_xy_table.item(0,1).text()),
                 "fx": float(self.point_f_table.item(0,0).text()),
                 "fy": float(self.point_f_table.item(0,1).text())
             }
-            # Add point load update method to ProjectState if not exists or use set_point_loads
-            loads = self._state.point_loads
-            for l in loads:
-                if l["id"] == lid:
-                    l.update(data)
-                    break
-            self._state.set_point_loads(loads)
+            # Position changes are ALWAYS global for now (to avoid mesh regeneration per stage)
+            pos_data = {
+                "x": float(self.point_xy_table.item(0,0).text()),
+                "y": float(self.point_xy_table.item(0,1).text())
+            }
+            
+            is_staging = (self._state.active_tab == "STAGING")
+            if is_staging:
+                self._state.update_phase_load_override(self._state.current_phase_index, lid, data)
+                # Keep position global
+                loads = self._state.point_loads
+                for l in loads:
+                    if l["id"] == lid:
+                        l.update(pos_data)
+                        break
+                self._state.set_point_loads(loads)
+            else:
+                data.update(pos_data)
+                loads = self._state.point_loads
+                for l in loads:
+                    if l["id"] == lid:
+                        l.update(data)
+                        break
+                self._state.set_point_loads(loads)
         except: self._sync_current_point_load(self._current_selection.get("id"))
 
     def _sync_current_line_load(self, lid):
@@ -421,12 +451,25 @@ class PropertiesSidebar(QWidget):
         if not target: return
         self._is_updating = True
         self.header_lbl.setText(f"Line Load #{lid}")
+        
+        is_staging = (self._state.active_tab == "STAGING")
+        current_phase = self._state.current_phase
+        
+        fx, fy = target['fx'], target['fy']
+        if is_staging and current_phase:
+            overrides = current_phase.get("load_overrides", {})
+            if lid in overrides:
+                ov = overrides[lid]
+                fx = ov.get("fx", fx)
+                fy = ov.get("fy", fy)
+                self.header_lbl.setText(f"Line Load #{lid} (Phase Override)")
+
         self.line_xy_table.setItem(0, 0, QTableWidgetItem(f"{target['x1']:.3f}"))
         self.line_xy_table.setItem(0, 1, QTableWidgetItem(f"{target['y1']:.3f}"))
         self.line_xy_table.setItem(1, 0, QTableWidgetItem(f"{target['x2']:.3f}"))
         self.line_xy_table.setItem(1, 1, QTableWidgetItem(f"{target['y2']:.3f}"))
-        self.line_f_table.setItem(0, 0, QTableWidgetItem(f"{target['fx']:.2f}"))
-        self.line_f_table.setItem(0, 1, QTableWidgetItem(f"{target['fy']:.2f}"))
+        self.line_f_table.setItem(0, 0, QTableWidgetItem(f"{fx:.2f}"))
+        self.line_f_table.setItem(0, 1, QTableWidgetItem(f"{fy:.2f}"))
         self._is_updating = False
 
     def _on_line_data_changed(self, item):
@@ -434,19 +477,33 @@ class PropertiesSidebar(QWidget):
         try:
             lid = self._current_selection.get("id")
             data = {
-                "x1": float(self.line_xy_table.item(0,0).text()),
-                "y1": float(self.line_xy_table.item(0,1).text()),
-                "x2": float(self.line_xy_table.item(1,0).text()),
-                "y2": float(self.line_xy_table.item(1,1).text()),
                 "fx": float(self.line_f_table.item(0,0).text()),
                 "fy": float(self.line_f_table.item(0,1).text())
             }
-            loads = self._state.line_loads
-            for l in loads:
-                if l["id"] == lid:
-                    l.update(data)
-                    break
-            self._state.set_line_loads(loads)
+            pos_data = {
+                "x1": float(self.line_xy_table.item(0,0).text()),
+                "y1": float(self.line_xy_table.item(0,1).text()),
+                "x2": float(self.line_xy_table.item(1,0).text()),
+                "y2": float(self.line_xy_table.item(1,1).text())
+            }
+            
+            is_staging = (self._state.active_tab == "STAGING")
+            if is_staging:
+                self._state.update_phase_load_override(self._state.current_phase_index, lid, data)
+                loads = self._state.line_loads
+                for l in loads:
+                    if l["id"] == lid:
+                        l.update(pos_data)
+                        break
+                self._state.set_line_loads(loads)
+            else:
+                data.update(pos_data)
+                loads = self._state.line_loads
+                for l in loads:
+                    if l["id"] == lid:
+                        l.update(data)
+                        break
+                self._state.set_line_loads(loads)
         except: self._sync_current_line_load(self._current_selection.get("id"))
 
     def _sync_current_water_level(self, wlid):

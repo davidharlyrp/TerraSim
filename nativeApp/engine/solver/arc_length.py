@@ -92,7 +92,8 @@ def arc_length_predictor(K_free, F_ref_free, arc_length_radius, sign_lambda):
 def arc_length_corrector(
     K_free, R_free, F_ref_free,
     delta_u_total, delta_lambda_total,
-    arc_length_radius
+    arc_length_radius,
+    delta_u_pred, delta_lambda_pred
 ):
     """
     Compute the corrector step using Crisfield's cylindrical constraint.
@@ -114,6 +115,8 @@ def arc_length_corrector(
         delta_u_total: Accumulated displacement increment for this step (free DOFs)
         delta_lambda_total: Accumulated load parameter for this step
         arc_length_radius: Target arc-length Δl
+        delta_u_pred: INITIAL predictor displacement for this step (free DOFs)
+        delta_lambda_pred: INITIAL predictor load parameter for this step
     
     Returns:
         du_corr: Corrector displacement update (free DOFs)
@@ -140,9 +143,10 @@ def arc_length_corrector(
         discriminant = b**2 - 4.0 * a * c
         
         if discriminant < 0:
-            # Constraint cannot be satisfied — fall back to pure residual correction
-            # This can happen when the arc-length radius is too small
-            return du_r, 0.0, True
+            # Constraint cannot be satisfied — the radius is likely too small 
+            # or the step is too far from the equilibrium path.
+            # Return False so the solver can reduce radius and retry the step.
+            return np.zeros_like(R_free), 0.0, False
         
         if abs(a) < 1e-30:
             # du_f is essentially zero — just use residual correction
@@ -152,18 +156,18 @@ def arc_length_corrector(
         d_lambda_1 = (-b + sqrt_disc) / (2.0 * a)
         d_lambda_2 = (-b - sqrt_disc) / (2.0 * a)
         
-        # Choose root that gives positive cosine with current direction
-        # (i.e., don't reverse direction along the path)
+        # Choose root that is most consistent with the PREDICTOR direction
+        # This prevents snap-back oscillation (jumping between loading/unloading)
         du_1 = du_r + d_lambda_1 * du_f
         du_2 = du_r + d_lambda_2 * du_f
         
-        new_u_1 = delta_u_total + du_1
-        new_u_2 = delta_u_total + du_2
+        # Consistent with predictor direction picking: 
+        # root_i is best if dot((delta_u_pred, d_lambda_pred), (new_u_i, d_lambda_i)) is max
+        # Simplified to: pick root that has largest dot product with predictor
+        dot_1 = d_lambda_1 * delta_lambda_pred + np.dot(du_1, delta_u_pred)
+        dot_2 = d_lambda_2 * delta_lambda_pred + np.dot(du_2, delta_u_pred)
         
-        cos_1 = np.dot(delta_u_total, new_u_1) if np.linalg.norm(delta_u_total) > 1e-15 else 1.0
-        cos_2 = np.dot(delta_u_total, new_u_2) if np.linalg.norm(delta_u_total) > 1e-15 else 1.0
-        
-        if cos_1 >= cos_2:
+        if dot_1 >= dot_2:
             return du_1, d_lambda_1, True
         else:
             return du_2, d_lambda_2, True
@@ -266,19 +270,11 @@ def run_arc_length_step(
         # Compute target m_stage for this corrector
         target_m_stage = current_m_stage + delta_lambda_total
         
-        # Clamp m_stage for non-SRM to [0, 1]
-        if not is_srm:
-            if target_m_stage > 1.0:
-                target_m_stage = 1.0
-                delta_lambda_total = 1.0 - current_m_stage
-            elif target_m_stage < 0.0:
-                target_m_stage = 0.0
-                delta_lambda_total = -current_m_stage
-        else:
-            # For SRM: Msf should not go below 1.0 (no strength amplification)
-            if target_m_stage < 1.0:
-                target_m_stage = 1.0
-                delta_lambda_total = 1.0 - current_m_stage
+        # NO CLAMPING of m_stage inside the corrector loop for Arc Length.
+        # Clamping violates the arc-length constraint (||du||^2 + ... = radius^2).
+        # We let the arc-length logic work naturally, and the caller (PhaseSolver) 
+        # will decide when to finalize the phase based on the reached_m_stage.
+        pass
         
         total_u_candidate = total_displacement + current_u_incremental + step_du
         
@@ -314,7 +310,8 @@ def run_arc_length_step(
         du_corr_free, d_lambda_corr, corr_ok = arc_length_corrector(
             K_free, R_free, F_ref_free,
             delta_u_free, delta_lambda_total,
-            arc_length_radius
+            arc_length_radius,
+            delta_u_pred_free, delta_lambda_pred
         )
         
         if not corr_ok:

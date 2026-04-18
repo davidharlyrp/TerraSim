@@ -1,7 +1,8 @@
 # ui/preferences_dialog.py
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QPushButton, QFrame, QWidget, QGroupBox
+    QDoubleSpinBox, QSpinBox, QCheckBox, QPushButton, QFrame, QWidget, QGroupBox,
+    QComboBox
 )
 from PySide6.QtCore import Qt, QStandardPaths
 from core.state import ProjectState
@@ -105,6 +106,18 @@ class PreferencesDialog(QDialog):
 
         root_layout.addWidget(meth_group)
 
+        # --- Boundary Conditions group ---
+        bc_group = QGroupBox("Boundary Conditions")
+        bc_layout = QVBoxLayout(bc_group)
+        bc_layout.setSpacing(6)
+        
+        self.cmb_x_min = self._add_row_combo(bc_layout, "X-Min Boundary:")
+        self.cmb_x_max = self._add_row_combo(bc_layout, "X-Max Boundary:")
+        self.cmb_y_min = self._add_row_combo(bc_layout, "Y-Min Boundary:")
+        self.cmb_y_max = self._add_row_combo(bc_layout, "Y-Max Boundary:")
+        
+        root_layout.addWidget(bc_group)
+
         # --- System Maintenance group ---
         sys_group = QGroupBox("System Maintenance")
         sys_layout = QVBoxLayout(sys_group)
@@ -166,13 +179,22 @@ class PreferencesDialog(QDialog):
         row_lyt.setContentsMargins(0, 0, 0, 0)
         lbl = QLabel(label_text)
         widget.setFixedWidth(120)
-        widget.setAlignment(Qt.AlignRight)
-        widget.setButtonSymbols(QDoubleSpinBox.NoButtons) # Hide arrows
+        if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+            widget.setAlignment(Qt.AlignRight)
+            widget.setButtonSymbols(QDoubleSpinBox.NoButtons) # Hide arrows
         row_lyt.addWidget(lbl)
         row_lyt.addStretch()
         row_lyt.addWidget(widget)
         layout.addWidget(row)
         return widget
+
+    def _add_row_combo(self, layout, label_text):
+        cmb = QComboBox()
+        cmb.addItem("Free", "free")
+        cmb.addItem("Fixed (X & Y)", "fixed")
+        cmb.addItem("Roller (Fix X)", "roller_x")
+        cmb.addItem("Roller (Fix Y)", "roller_y")
+        return self._add_row(layout, label_text, cmb)
 
     def _sync_from_state(self):
         s = self._state.settings
@@ -184,6 +206,17 @@ class PreferencesDialog(QDialog):
         self.chk_al.setChecked(s.get("use_arc_length", False))
         self.chk_pardiso.setChecked(s.get("use_pardiso", True) and HAS_PARDISO)
         self.spn_max_logs.setValue(s.get("max_log_files", 5))
+        
+        # Sync BCs
+        bc_x_min = s.get("bc_x_min", "roller_x")
+        bc_x_max = s.get("bc_x_max", "roller_x")
+        bc_y_min = s.get("bc_y_min", "fixed")
+        bc_y_max = s.get("bc_y_max", "free")
+        
+        self.cmb_x_min.setCurrentIndex(self.cmb_x_min.findData(bc_x_min))
+        self.cmb_x_max.setCurrentIndex(self.cmb_x_max.findData(bc_x_max))
+        self.cmb_y_min.setCurrentIndex(self.cmb_y_min.findData(bc_y_min))
+        self.cmb_y_max.setCurrentIndex(self.cmb_y_max.findData(bc_y_max))
 
     def _on_reset_clicked(self):
         self._state.reset_settings_to_default()
@@ -198,7 +231,11 @@ class PreferencesDialog(QDialog):
             "max_displacement_limit": self.spn_disp_limit.value(),
             "use_arc_length": self.chk_al.isChecked(),
             "use_pardiso": self.chk_pardiso.isChecked(),
-            "max_log_files": self.spn_max_logs.value()
+            "max_log_files": self.spn_max_logs.value(),
+            "bc_x_min": self.cmb_x_min.currentData() or "roller_x",
+            "bc_x_max": self.cmb_x_max.currentData() or "roller_x",
+            "bc_y_min": self.cmb_y_min.currentData() or "fixed",
+            "bc_y_max": self.cmb_y_max.currentData() or "free"
         }
         self._state.update_settings(data)
 

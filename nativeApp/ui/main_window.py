@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, initial_file: str = None):
         super().__init__()
-        self.setWindowTitle("TerraSim 0.6.0 Beta - Geotechnical Finite Element Analysis")
+        self.setWindowTitle("TerraSim 0.7.0 Beta - Geotechnical Finite Element Analysis")
         self.resize(1200, 800)
 
         # Project state (singleton)
@@ -242,6 +242,11 @@ class MainWindow(QMainWindow):
         self.output_panel = OutputPanel()
         self.output_panel.setVisible(False)
         self.left_splitter.addWidget(self.output_panel)
+
+        from ui.result_explorer import ResultExplorer
+        self.result_explorer = ResultExplorer()
+        self.result_explorer.setVisible(False)
+        self.left_splitter.addWidget(self.result_explorer)
 
         self.explorer = BrowserExplorer()
         self.explorer.setMinimumWidth(140)
@@ -517,6 +522,10 @@ class MainWindow(QMainWindow):
 
         # Toggle Output Panel visibility
         self.output_panel.setVisible(is_result)
+        
+        # Toggle explorers
+        self.explorer.setVisible(not is_result)
+        self.result_explorer.setVisible(is_result)
 
         # In Result mode, we hide properties but show results list (staging sidebar)
         # In Mesh mode, we hide both, so hide the whole splitter
@@ -628,7 +637,7 @@ class MainWindow(QMainWindow):
         p_name = self.state.project_name
         path = self.state.current_file_path
         file_str = f" - [{os.path.basename(path)}]" if path else ""
-        self.setWindowTitle(f"TerraSim 0.6.0 Beta - {p_name}{file_str}")
+        self.setWindowTitle(f"TerraSim 0.7.0 Beta - {file_str}")
 
     def _log(self, message: str):
         """Log a message to the UI console and persistent disk log."""

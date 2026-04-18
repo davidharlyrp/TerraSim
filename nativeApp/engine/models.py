@@ -157,7 +157,7 @@ class EmbeddedBeamAssignment(BaseModel):
 class MeshResponse(BaseModel):
     success: bool
     nodes: List[List[float]] # [[x, y], ...]
-    elements: List[List[int]] # [[n1, n2, n3, n4, n5, n6], ...] 0-based, 6-node quadratic triangles
+    elements: List[List[int]] # [[n1, ..., n15], ...] 0-based, 15-node quartic triangles
     boundary_conditions: BoundaryConditionsResponse
     point_load_assignments: List[PointLoadAssignment]
     line_load_assignments: List[LineLoadAssignment]
@@ -180,6 +180,10 @@ class SolverSettings(BaseModel):
     max_displacement_limit: Optional[float] = 10.0 # Define "collapse" if disp > 10m
     use_arc_length: Optional[bool] = False # Use Crisfield arc-length method instead of Newton-Raphson
     use_pardiso: Optional[bool] = True    # Use multi-threaded Pardiso solver if available
+    bc_x_min: Optional[str] = "roller_x"  # Options: "free", "fixed", "roller_x", "roller_y"
+    bc_x_max: Optional[str] = "roller_x"
+    bc_y_min: Optional[str] = "fixed"
+    bc_y_max: Optional[str] = "free"
 
 class PointLoadData(BaseModel):
     node: int  # 0-based node index
@@ -194,8 +198,9 @@ class PhaseRequest(BaseModel):
     active_polygon_indices: List[int] # Indices of polygons in original MeshRequest
     active_load_ids: List[str] # IDs of point/line loads to activate
     reset_displacements: bool = False # If true, reset total displacement visualization
-    current_material: Dict[int, str] = {} # Map polygon_index -> material_id (full state for this phase)
-    parent_material: Dict[int, str] = {} # Map polygon_index -> material_id (inherited from parent)
+    current_material: Dict[str, str] = {} # Map polygon_index -> material_id (full state for this phase)
+    parent_material: Dict[str, str] = {} # Map polygon_index -> material_id (inherited from parent)
+    load_overrides: Dict[str, Dict[str, float]] = {} # Map load_id -> {fx: val, fy: val}
     active_water_level_id: Optional[str] = None # NEW
     active_beam_ids: Optional[List[str]] = [] # IDs of active beams
     kh: float = 0.0 # Pseudo-static horizontal coefficient

@@ -16,32 +16,23 @@ from engine.solver.phase_solver import solve_phases
 import asyncio
 
 def create_mock_request():
-    # 1. Define Nodes (2 triangles sharing a side)
-    # T6 elements need 6 nodes per element.
-    # High order (quadratic) mesh.
-    
-    # Quad 2x1 split into 2 triangles
-    # Nodes:
-    # 0,0  1,0  2,0
-    # 0,1  1,1  2,1
-    # Plus mid-nodes
-    
-    # Let's just make ONE T6 element for simplicity
-    # Nodes: 
-    # 0: (0,0), 1: (2,0), 2: (0,2)  (Corner nodes)
-    # 3: (1,0), 4: (1,1), 5: (0,1)  (Mid nodes)
+    # 1. Define Nodes for ONE T15 Triangle (Quartic)
+    # Corners: 0,0  2,0  0,2
+    # Edge 12 (at 0.25, 0.5, 0.75): (0.5, 0), (1, 0), (1.5, 0)
+    # Edge 23: (1.5, 0.5), (1, 1), (0.5, 1.5)
+    # Edge 31: (0, 1.5), (0, 1), (0, 0.5)
+    # Interiors: (0.5, 0.5), (1, 0.5), (0.5, 1)
     
     nodes = [
-        [0.0, 0.0], # 0
-        [2.0, 0.0], # 1
-        [0.0, 2.0], # 2
-        [1.0, 0.0], # 3
-        [1.0, 1.0], # 4
-        [0.0, 1.0]  # 5
+        [0.0, 0.0], [2.0, 0.0], [0.0, 2.0], # 0,1,2 (Corners)
+        [0.5, 0.0], [1.0, 0.0], [1.5, 0.0], # 3,4,5 (Edge 12)
+        [1.5, 0.5], [1.0, 1.0], [0.5, 1.5], # 6,7,8 (Edge 23)
+        [0.0, 1.5], [0.0, 1.0], [0.0, 0.5], # 9,10,11 (Edge 31)
+        [0.5, 0.5], [1.0, 0.5], [0.5, 1.0]  # 12,13,14 (Interiors)
     ]
     
     elements = [
-        [0, 1, 2, 3, 4, 5] 
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] 
     ]
     
     # Material
@@ -49,8 +40,9 @@ def create_mock_request():
         id="mat1",
         name="Soft Clay",
         color="#ff0000",
-        youngsModulus=1000.0,
-        poissonsRatio=0.3, # Incompressible-ish? 
+        youngsModulus=10000.0, # Stiffer for test
+        effyoungsModulus=10000.0,
+        poissonsRatio=0.3, 
         unitWeightUnsaturated=18.0,
         cohesion=5.0,
         frictionAngle=25.0,
@@ -62,21 +54,12 @@ def create_mock_request():
         ElementMaterial(element_id=1, material=mat, polygon_id=0)
     ]
     
-    # Boundary Conditions
-    # Fully constraint bottom left (Node 0)
-    # But if we ONLY constraint Node 0, the element can rotate! -> Singular
-    # Let's constraint Node 1 in Y only (Roller)
-    
-    # TO REPRODUCE SINGULARITY: 
-    # Constraint only Y at bottom (Nodes 0, 1, 3). No X constraint.
-    # System is free to slide in X.
-    
-    full_fixed = [] 
-    normal_fixed = [
-        BoundaryCondition(node=0), # Y fixed
-        BoundaryCondition(node=1), # Y fixed
-        BoundaryCondition(node=3)  # Y fixed
+    # Boundary Conditions: Fully fix the bottom edge (0-1: 0, 1, 3, 4, 5)
+    full_fixed = [
+        BoundaryCondition(node=0), BoundaryCondition(node=1),
+        BoundaryCondition(node=3), BoundaryCondition(node=4), BoundaryCondition(node=5)
     ]
+    normal_fixed = []
     
     mesh = MeshResponse(
         success=True,
@@ -88,13 +71,14 @@ def create_mock_request():
         ),
         point_load_assignments=[],
         line_load_assignments=[],
+        embedded_beam_assignments=[],
         element_materials=elem_materials
     )
     
     # Phase
     phase = PhaseRequest(
         id="phase1",
-        name="Gravity Loading",
+        name="Plastic Step",
         phase_type=PhaseType.PLASTIC,
         active_polygon_indices=[0],
         active_load_ids=[],
@@ -107,7 +91,12 @@ def create_mock_request():
         mesh=mesh,
         phases=[phase],
         materials=[mat],
-        settings=SolverSettings(max_iterations=10, initial_step_size=1.0)
+        beam_materials=[],
+        embedded_beams=[],
+        point_loads=[],
+        line_loads=[],
+        water_levels=[],
+        settings=SolverSettings(max_iterations=15, initial_step_size=0.1)
     )
     
     return req

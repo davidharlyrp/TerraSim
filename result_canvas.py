@@ -93,11 +93,10 @@ class ResultCanvas(QGraphicsView):
         self._load_items: list[QGraphicsItem] = []
         self._water_items: list[QGraphicsItem] = []
         self._heatmap_item: QGraphicsItem | None = None
-        self._bc_items: list[QGraphicsItem] = []
         self._current_mouse_scene_pos = QPointF(0, 0)
 
-        # Trigger full refresh when settings change (BCs, etc.)
-        self._state.settings_changed.connect(lambda s: self._refresh_view())
+        # Trigger repaint when settings change (grid/rulers)
+        self._state.settings_changed.connect(lambda s: self.viewport().update())
 
         # Connect signals
         self._state.polygons_changed.connect(self._refresh_view)
@@ -106,7 +105,6 @@ class ResultCanvas(QGraphicsView):
         self._state.active_tab_changed.connect(self._on_tab_changed)
         self._state.output_settings_changed.connect(lambda _: self._refresh_view())
         self._state.solver_response_changed.connect(lambda _: self._refresh_view())
-        self._state.result_visibility_changed.connect(self._refresh_view)
 
         # Initial render
         self._refresh_view()
@@ -121,8 +119,6 @@ class ResultCanvas(QGraphicsView):
         """Full re-render of model components based on current phase results."""
         self._render_polygons()
         self._render_mesh()
-        self._render_loads()
-        self._render_bc_markers()
         self.viewport().update()
 
     def _on_tab_changed(self, tab):
@@ -140,7 +136,6 @@ class ResultCanvas(QGraphicsView):
 
         for i, poly_data in enumerate(self._state.polygons):
             if i not in active_indices: continue
-            if i in self._state.result_hidden_polygons: continue
 
             qpoly = QPolygonF()
             # Polygons in state have 'points' (x, y)
@@ -257,28 +252,20 @@ class ResultCanvas(QGraphicsView):
                 stress_gp_map = {} 
                 for s in phase_results["stresses"]:
                     eid = u_get(s, "element_id")
-                    if eid not in stress_gp_map: stress_gp_map[eid] = [None] * 12
+                    if eid not in stress_gp_map: stress_gp_map[eid] = [None, None, None]
                     gp_id = u_get(s, "gp_id", 1)
-                    if 1 <= gp_id <= 12: stress_gp_map[eid][gp_id-1] = s
+                    if 1 <= gp_id <= 3: stress_gp_map[eid][gp_id-1] = s
 
-                # IDW extrapolated weights from 12 Dunavant GPs to 3 corner nodes for smooth contours
-                T15_EXTRAP = [
-                    [0.925, 0.001, 0.001, 0.015, 0.004, 0.004, 0.021, 0.003, 0.002, 0.021, 0.002, 0.003],
-                    [0.003, 0.001, 0.885, 0.005, 0.003, 0.014, 0.008, 0.002, 0.023, 0.003, 0.003, 0.050],
-                    [0.003, 0.885, 0.001, 0.005, 0.014, 0.003, 0.003, 0.050, 0.003, 0.008, 0.023, 0.002]
-                ]
+                EXTRAP = [ [1.666, -0.333, -0.333], [-0.333, 1.666, -0.333], [-0.333, -0.333, 1.666] ]
                 for eid, gps in stress_gp_map.items():
                     if None in gps: continue
                     elem = elements[eid-1]
                     pid = self._el_to_poly.get(eid-1)
-                    if pid in self._state.result_hidden_polygons: continue
-                    
-                    gp_vals = [self._get_stress_value(g, out_type) for g in gps]
-                    
-                    for ni in range(3):
+                    gp_vals = [ self._get_stress_value(g, out_type) for g in gps ]
+                    for ni in range(3): 
                         node_idx = elem[ni]
-                        val = sum(T15_EXTRAP[ni][k] * gp_vals[k] for k in range(12))
-                        # Per-polygon key for sharp material boundary discontinuities
+                        val = EXTRAP[ni][0]*gp_vals[0] + EXTRAP[ni][1]*gp_vals[1] + EXTRAP[ni][2]*gp_vals[2]
+                        # For stresses, average ONLY within same polygon to ensure sharp material boundaries
                         key = (node_idx, pid)
                         if key not in self._last_nodal_vals: self._last_nodal_vals[key] = [0.0, 0]
                         self._last_nodal_vals[key][0] += val; self._last_nodal_vals[key][1] += 1
@@ -297,7 +284,11 @@ class ResultCanvas(QGraphicsView):
                     self._last_nodal_vals[key][0] += val; self._last_nodal_vals[key][1] += 1
                     nodal_raw.append(val)
 
-        # 6. Color range — simple min/max (matching proven T6 approach)
+        # 6. FACETED COLORING (Manual Element-by-Element)
+        # We calculate a value per element and fill it directly.
+        # This is inherently clipped to the mesh geometry.
+        
+        # Helper to map 0..1 to a Jet-style colormap color
         def get_jet_color(v: float, alpha: int = 255) -> QColor:
             v = max(0.0, min(1.0, v))
             r, g, b = 0, 0, 0
@@ -306,23 +297,13 @@ class ResultCanvas(QGraphicsView):
             elif v < 0.75: r, g, b = int((v-0.5)*4*255), 255, 0
             else: r, g, b = 255, int((1.0-v)*4*255), 0
         v_min, v_max = 0.0, 1.0
-        _invert_cmap = False
         if self._last_nodal_vals:
+            # Use averaged values for normalization to match Legend and avoid raw spikes
             avg_vals = [v[0]/v[1] for v in self._last_nodal_vals.values()]
             v_min, v_max = min(avg_vals), max(avg_vals)
             if v_min == v_max: v_max += 1e-9
-            
-            # Expand by a tiny epsilon so edge floats are fully enclosed without needing extend='both'
-            eps = (v_max - v_min) * 1e-5
-            if eps == 0.0: eps = 1e-9
-            v_min -= eps
-            v_max += eps
-            # Zero-relative color mapping
-            if abs(v_min) > abs(v_max):
-                _invert_cmap = True
 
-        # 7. PER-POLYGON CONTOUR GENERATION (Layer 1: Fills at Z=12)
-        # Exact replica of the proven T6 contour pipeline — uses only 3 corner nodes per element.
+        # 6. VECTOR CONTOUR GENERATION (Layer 1: Fills at Z=12)
         if is_contour and self._last_nodal_vals:
             import matplotlib.tri as tri
             import matplotlib.cm as cm
@@ -332,12 +313,11 @@ class ResultCanvas(QGraphicsView):
             for idx, elem in enumerate(elements):
                 pid = self._el_to_poly.get(idx)
                 if pid is None or pid not in active_indices: continue
-                if pid in self._state.result_hidden_polygons: continue
                 if pid not in poly_to_elements: poly_to_elements[pid] = []
                 poly_to_elements[pid].append(idx)
 
-            # Increase contour levels to 30 for smoother color gradients
-            num_levels = 30
+            num_levels = 20
+            # Use standard 'jet' and manual inversion logic to keep consistent with Legend CSS
             cmap = cm.get_cmap('jet')
             
             for pid, elem_indices in poly_to_elements.items():
@@ -348,7 +328,7 @@ class ResultCanvas(QGraphicsView):
                     for idx in elem_indices:
                         e = elements[idx]
                         subset_tri_indices.append(e[:3]) # Only corner nodes for triangulation
-                        involved_node_indices.update(e[:3]) # Only corners needed
+                        involved_node_indices.update(e[:6]) # All nodes for value collection
                     
                     sub_nodes_idx = sorted(list(involved_node_indices))
                     node_map = {old: new for new, old in enumerate(sub_nodes_idx)}
@@ -356,9 +336,10 @@ class ResultCanvas(QGraphicsView):
                     sub_x = [nodes[i][0] for i in sub_nodes_idx]
                     sub_y = [nodes[i][1] for i in sub_nodes_idx]
                     
-                    # Compute nodal values using polygon-specific key (sharp material boundaries)
+                    # Compute nodal values using the current Polygon ID for correctly discontinuous results
                     sub_v = []
                     for i in sub_nodes_idx:
+                        # Try polygon-specific key first, fall back to global if displacement
                         val_raw = self._last_nodal_vals.get((i, pid)) or self._last_nodal_vals.get((i, None), [0.0, 1])
                         sub_v.append(val_raw[0] / val_raw[1])
                     
@@ -369,20 +350,22 @@ class ResultCanvas(QGraphicsView):
                                 dx, dy = disp_map[n_idx]
                                 sub_x[i] += dx * scale; sub_y[i] += dy * scale
 
-                    sub_tri = [[node_map[ni] for ni in t] for t in subset_tri_indices]
+                    sub_tri = [[node_map[ni] for ni in tri] for tri in subset_tri_indices]
                     
                     if len(sub_x) < 3 or not sub_tri: continue
                     
-                    # Create base triangulation and contour it directly. IDW extrapolation makes this smooth enough.
                     triang = tri.Triangulation(sub_x, sub_y, sub_tri)
                     levels = np.linspace(v_min, v_max, num_levels + 1)
                     
                     cntr = self._get_contourf_data(triang, sub_v, levels)
                     
-                    for level_idx in range(len(levels) - 1):
+                    # Matplotlib 3.8+ Compatibility: use get_paths() directly on the ContourSet
+                    # Each path in cntr.get_paths() corresponds to one contour band
+                    paths = cntr.allsegs if hasattr(cntr, 'allsegs') else cntr.get_paths()
+                    
+                    for level_idx, path_data in enumerate(paths):
                         t_val = (levels[level_idx] + levels[level_idx+1]) / 2.0
                         v_norm = (t_val - v_min) / (v_max - v_min)
-                        if _invert_cmap: v_norm = 1.0 - v_norm
                         
                         color = cmap(v_norm)
                         qcolor = QColor(int(color[0]*255), int(color[1]*255), int(color[2]*255), 255)
@@ -410,9 +393,16 @@ class ResultCanvas(QGraphicsView):
         for idx, elem in enumerate(elements):
             pid = self._el_to_poly.get(idx)
             if pid is not None and pid not in active_indices: continue
-            if pid in self._state.result_hidden_polygons: continue
             if len(elem) < 3: continue
             
+            is_yielded = False
+
+            if out_type == OutputType.YIELD_STATUS and phase_results and "stresses" in phase_results:
+                eid = idx + 1
+                for s in phase_results["stresses"]:
+                    if u_get(s, "element_id") == eid and u_get(s, "is_yielded", False):
+                        is_yielded = True; break
+
             # Base coordinates (deformed)
             pts = []
             for ni in range(3):
@@ -438,36 +428,32 @@ class ResultCanvas(QGraphicsView):
                 item.setZValue(12); self._mesh_items.append(item)
 
             elif out_type == OutputType.YIELD_STATUS:
-                # Per-GP yield status: each of the 12 Dunavant GPs gets its own color
-                eid = idx + 1
-                # Collect per-GP yield flags for this element
-                gp_yield_flags = [False] * 12
-                if phase_results and "stresses" in phase_results:
-                    for s in phase_results["stresses"]:
-                        if u_get(s, "element_id") == eid:
-                            gp_id = u_get(s, "gp_id", 1)
-                            if 1 <= gp_id <= 12:
-                                gp_yield_flags[gp_id - 1] = u_get(s, "is_yielded", False)
+                # SPECIAL TREATMENT: Draw Gauss Points (GPs) as small circles
+                gp_fill = QBrush(QColor("#10b981")) # Default Green
+                if is_yielded:
+                    gp_fill = QBrush(QColor("#ef4444")) # Yielded Red
                 
-                # 12-point Dunavant GP natural coordinates (xi, eta)
-                from engine.solver.element_t15 import GAUSS_POINTS as GP_NAT
-                node_coords_elem = [nodes[elem[ni]] for ni in range(min(len(elem), 15))]
+                # Barycentric GP positions for 3-point rule (approx)
+                gp_coords = [(2/3, 1/6, 1/6), (1/6, 2/3, 1/6), (1/6, 1/6, 2/3)]
+                tri_nodes = [nodes[elem[0]], nodes[elem[1]], nodes[elem[2]]]
                 
-                for gp_idx in range(12):
-                    xi, eta = GP_NAT[gp_idx]
-                    # Barycentric: L1 = 1 - xi - eta, L2 = xi, L3 = eta
-                    L1 = 1.0 - xi - eta
-                    L2 = xi
-                    L3 = eta
-                    # Map to physical coords using corner nodes only
-                    gx = L1 * node_coords_elem[0][0] + L2 * node_coords_elem[1][0] + L3 * node_coords_elem[2][0]
-                    gy = L1 * node_coords_elem[0][1] + L2 * node_coords_elem[1][1] + L3 * node_coords_elem[2][1]
+                for b1, b2, b3 in gp_coords:
+                    gx = b1*tri_nodes[0][0] + b2*tri_nodes[1][0] + b3*tri_nodes[2][0]
+                    gy = b1*tri_nodes[0][1] + b2*tri_nodes[1][1] + b3*tri_nodes[2][1]
                     
-                    gp_fill = QBrush(QColor("#ef4444")) if gp_yield_flags[gp_idx] else QBrush(QColor("#10b981"))
-                    
-                    gp_item = self._scene.addEllipse(gx-0.025, gy-0.025, 0.05, 0.05, QPen(Qt.NoPen), gp_fill)
-                    gp_item.setZValue(25)
-                    gp_item.setData(10, "gp_status")
+                    # Apply deformation if needed
+                    # Find nearest corner node for deformation or just interpolate
+                    for j in range(3):
+                        n_idx = elem[j]
+                        if n_idx in disp_map:
+                            dx, dy = disp_map[n_idx]
+                            # Simple interpolation of displacement
+                            gx += dx * scale * (1/3); gy += dy * scale * (1/3)
+
+                    # Draw high-visibility Dot
+                    gp_item = self._scene.addEllipse(gx-0.05, gy-0.05, 0.1, 0.1, QPen(Qt.NoPen), gp_fill)
+                    gp_item.setZValue(25) # Top level
+                    gp_item.setData(10, "gp_status") # Tag for hover identification
                     self._mesh_items.append(gp_item)
 
             # --- Layer 2: ORIGINAL MESH WIREFRAME (Z=15) ---
@@ -492,87 +478,88 @@ class ResultCanvas(QGraphicsView):
                 p_item.setZValue(20); self._mesh_items.append(p_item)
 
         # --- Layer 4: STRUCTURAL BEAMS (Z=22) ---
-        bm_lookup = {m.get("id"): m for m in self._state.beam_materials}
-        active_beam_ids = set(current_phase.get("active_beam_ids", [])) if current_phase else set()
-        active_beam_ids.difference_update(self._state.result_hidden_beams)
+        show_ebr = getattr(self._state, "show_ebr", False)
+        if show_ebr:
+            bm_lookup = {m.get("id"): m for m in self._state.beam_materials}
+            active_beam_ids = set(current_phase.get("active_beam_ids", [])) if current_phase else set()
             
-        # Helper to get deformed positions
-        def get_deformed_pos(n_idx):
-            x, y = nodes[n_idx][0], nodes[n_idx][1]
-            if n_idx in disp_map:
-                dx, dy = disp_map[n_idx]; x += dx * scale; y += dy * scale
-            return QPointF(x, y)
+            # Helper to get deformed positions
+            def get_deformed_pos(n_idx):
+                x, y = nodes[n_idx][0], nodes[n_idx][1]
+                if n_idx in disp_map:
+                    dx, dy = disp_map[n_idx]; x += dx * scale; y += dy * scale
+                return QPointF(x, y)
 
-        # Draw beams using assignments (segmented/curved)
-        assignments = self._mesh_data.get("embedded_beam_assignments", [])
-        beam_defs = {b.get("id"): b for b in self._state.embedded_beams}
+            # Draw beams using assignments (segmented/curved)
+            assignments = self._mesh_data.get("embedded_beam_assignments", [])
+            beam_defs = {b.get("id"): b for b in self._state.embedded_beams}
 
-        for assign in assignments:
-            bid = assign.get("beam_id")
-            if bid not in active_beam_ids: continue
-            
-            b_def = beam_defs.get(bid, {})
-            mid = b_def.get("materialId")
-            color = QColor(bm_lookup[mid].get("color", "#2563eb")) if mid and mid in bm_lookup else QColor("#2563eb")
-            
-            pen = QPen(color, 4)
-            pen.setCosmetic(True)
-            
-            n_ids = assign.get("nodes", [])
-            if len(n_ids) < 2: continue
+            for assign in assignments:
+                bid = assign.get("beam_id")
+                if bid not in active_beam_ids: continue
+                
+                b_def = beam_defs.get(bid, {})
+                mid = b_def.get("materialId")
+                color = QColor(bm_lookup[mid].get("color", "#2563eb")) if mid and mid in bm_lookup else QColor("#2563eb")
+                
+                pen = QPen(color, 4)
+                pen.setCosmetic(True)
+                
+                n_ids = assign.get("nodes", [])
+                if len(n_ids) < 2: continue
 
-            # Draw segments between nodes
-            for i in range(len(n_ids) - 1):
-                p1 = get_deformed_pos(n_ids[i] - 1)
-                p2 = get_deformed_pos(n_ids[i+1] - 1)
-                
-                line_item = self._scene.addLine(p1.x(), p1.y(), p2.x(), p2.y(), pen)
-                line_item.setZValue(22)
-                line_item.setData(Qt.UserRole, bid)
-                line_item.setData(Qt.UserRole + 1, "embedded_beam")
-                self._mesh_items.append(line_item)
+                # Draw segments between nodes
+                for i in range(len(n_ids) - 1):
+                    p1 = get_deformed_pos(n_ids[i] - 1)
+                    p2 = get_deformed_pos(n_ids[i+1] - 1)
+                    
+                    line_item = self._scene.addLine(p1.x(), p1.y(), p2.x(), p2.y(), pen)
+                    line_item.setZValue(22)
+                    line_item.setData(Qt.UserRole, bid)
+                    line_item.setData(Qt.UserRole + 1, "embedded_beam")
+                    self._mesh_items.append(line_item)
 
-            # 5. Draw Connection Marker at Head
-            h_idx = b_def.get("head_point_index", 0)
-            h_node_gi = (n_ids[0] - 1) if h_idx == 0 else (n_ids[-1] - 1)
-            neighbor_gi = (n_ids[1] - 1) if h_idx == 0 else (n_ids[-2] - 1)
-            
-            h_pos = get_deformed_pos(h_node_gi)
-            n_pos = get_deformed_pos(neighbor_gi)
-            
-            head_conn = str(b_def.get("head_connection_type", "FIXED")).upper()
-            marker_size = 0.15
-            
-            h_pen = QPen(color, 0.1)
-            h_brush = QBrush(color)
-            
-            if head_conn in ["FIXED", "FIX"]:
-                # Square
-                box_sz = 0.15
-                rect_item = self._scene.addRect(
-                    h_pos.x() - box_sz/2, h_pos.y() - box_sz/2, box_sz, box_sz,
-                    h_pen, h_brush
-                )
-                rect_item.setZValue(25)
-                self._mesh_items.append(rect_item)
-            else:
-                # Triangle pointing into beam along the first segment
-                angle_rad = math.atan2(n_pos.y() - h_pos.y(), n_pos.x() - h_pos.x())
+                # 5. Draw Connection Marker at Head
+                h_idx = b_def.get("head_point_index", 0)
+                h_node_gi = (n_ids[0] - 1) if h_idx == 0 else (n_ids[-1] - 1)
+                neighbor_gi = (n_ids[1] - 1) if h_idx == 0 else (n_ids[-2] - 1)
                 
-                p_tri = [QPointF(0, 0), QPointF(marker_size, -marker_size/2.5), QPointF(marker_size, marker_size/2.5)]
-                q_poly = QPolygonF(p_tri)
+                h_pos = get_deformed_pos(h_node_gi)
+                n_pos = get_deformed_pos(neighbor_gi)
                 
-                trans = QTransform().translate(h_pos.x(), h_pos.y()).rotateRadians(angle_rad)
-                rotated_poly = trans.map(q_poly)
+                head_conn = str(b_def.get("head_connection_type", "FIXED")).upper()
+                marker_size = 0.15
                 
-                tri_item = self._scene.addPolygon(rotated_poly, h_pen, h_brush)
-                tri_item.setZValue(25)
-                self._mesh_items.append(tri_item)
+                h_pen = QPen(color, 0.1)
+                h_brush = QBrush(color)
+                
+                if head_conn in ["FIXED", "FIX"]:
+                    # Square
+                    box_sz = 0.15
+                    rect_item = self._scene.addRect(
+                        h_pos.x() - box_sz/2, h_pos.y() - box_sz/2, box_sz, box_sz,
+                        h_pen, h_brush
+                    )
+                    rect_item.setZValue(25)
+                    self._mesh_items.append(rect_item)
+                else:
+                    # Triangle pointing into beam along the first segment
+                    angle_rad = math.atan2(n_pos.y() - h_pos.y(), n_pos.x() - h_pos.x())
+                    
+                    p_tri = [QPointF(0, 0), QPointF(marker_size, -marker_size/2.5), QPointF(marker_size, marker_size/2.5)]
+                    q_poly = QPolygonF(p_tri)
+                    
+                    trans = QTransform().translate(h_pos.x(), h_pos.y()).rotateRadians(angle_rad)
+                    rotated_poly = trans.map(q_poly)
+                    
+                    tri_item = self._scene.addPolygon(rotated_poly, h_pen, h_brush)
+                    tri_item.setZValue(25)
+                    self._mesh_items.append(tri_item)
 
         # Update Legend Panel
-        self._update_legend(v_min, v_max, out_type, invert=_invert_cmap)
+        self._update_legend(v_min, v_max, out_type)
 
-    def _update_legend(self, v_min, v_max, out_type, invert=False):
+    def _update_legend(self, v_min, v_max, out_type):
         """Show/Hide and update the dynamic results legend."""
         if not hasattr(self, "_legend_panel"):
             self._legend_panel = self._create_legend_panel()
@@ -586,23 +573,7 @@ class ResultCanvas(QGraphicsView):
             if "contour" in str(out_type):
                 unit = " m"
             elif "sigma" in str(out_type) or "pwp" in str(out_type):
-                unit = " kN/m\u00b2"
-            
-            # Update gradient bar direction to match contour colormap
-            if invert:
-                # Inverted: Red (left/min) -> Blue (right/max)
-                self._legend_bar.setStyleSheet("""
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                        stop:0 #7f0000, stop:0.25 #ffff00, stop:0.5 #00ff00, stop:0.75 #00ffff, stop:1 #00007f);
-                    border: 1px solid #94a3b8;
-                """)
-            else:
-                # Normal: Blue (left/min) -> Red (right/max)
-                self._legend_bar.setStyleSheet("""
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                        stop:0 #00007f, stop:0.25 #00ffff, stop:0.5 #00ff00, stop:0.75 #ffff00, stop:1 #7f0000);
-                    border: 1px solid #94a3b8;
-                """)
+                unit = " kN/m²"
             
             self._lbl_min.setText(f"{v_min:.3f}{unit}")
             self._lbl_max.setText(f"{v_max:.3f}{unit}")
@@ -625,17 +596,21 @@ class ResultCanvas(QGraphicsView):
         self._lbl_title.setStyleSheet("font-weight: bold; color: #1e293b;")
         layout.addWidget(self._lbl_title, 0, Qt.AlignCenter)
         
-        # Color bar (stored as instance var so we can update its gradient)
-        self._legend_bar = QFrame()
-        self._legend_bar.setFixedHeight(12)
-        self._legend_bar.setStyleSheet("""
+        # Color bar
+        bar = QFrame()
+        bar.setFixedHeight(12)
+        bar.setStyleSheet("""
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                 stop:0 #00007f, stop:0.25 #00ffff, stop:0.5 #00ff00, stop:0.75 #ffff00, stop:1 #7f0000);
             border: 1px solid #94a3b8;
         """)
-        layout.addWidget(self._legend_bar)
+        layout.addWidget(bar)
         
         # Labels
+        lbl_box = QFrame()
+        lbl_layout = QVBoxLayout(lbl_box) # Simplified for space
+        lbl_layout.setContentsMargins(0,0,0,0)
+        
         sub_layout = QVBoxLayout()
         sub_layout.setDirection(QVBoxLayout.LeftToRight)
         self._lbl_min = QLabel("0.000")
@@ -816,120 +791,6 @@ class ResultCanvas(QGraphicsView):
             return raw[0] / raw[1]
         return None
 
-    def _render_bc_markers(self):
-        """Draw minimalist boundary condition symbols on affected nodes."""
-        for item in self._bc_items: self._scene.removeItem(item)
-        self._bc_items.clear()
-        
-        if not self._state.show_bc_markers or not self._mesh_data:
-            return
-
-        nodes = self._mesh_data.get("nodes", [])
-        if not nodes: return
-        
-        # Calculate boundaries (same logic as solver)
-        xs = [n[0] for n in nodes]
-        ys = [n[1] for n in nodes]
-        x_min, x_max = min(xs), max(xs)
-        y_min, y_max = min(ys), max(ys)
-        
-        settings = self._state.settings
-        bc_map = {
-            "x_min": settings.get("bc_x_min", "roller_x").lower(),
-            "x_max": settings.get("bc_x_max", "roller_x").lower(),
-            "y_min": settings.get("bc_y_min", "fixed").lower(),
-            "y_max": settings.get("bc_y_max", "free").lower(),
-        }
-        
-        TOL = 1e-4
-        SIZE = 0.05 # Standard marker size
-
-        def add_marker(x, y, bc_type, side):
-            if bc_type == "free": return
-            
-            marker_items = []
-            
-            pen = QPen(QColor("#111827"), 1.2)
-            pen.setCosmetic(True)
-            brush = QBrush(QColor("#111827")) # Solid black/dark
-            opaque_brush = QBrush(QColor(17, 24, 39, 40)) # Light transparent for rollers
-            
-            if bc_type == "fixed":
-                # Pin symbol: A filled triangle
-                qpoly = QPolygonF([QPointF(0, 0), QPointF(-SIZE/2, SIZE), QPointF(SIZE/2, SIZE)])
-                # Rotate based on side
-                rotation = 0
-                if side == "x_min": rotation = 90
-                elif side == "x_max": rotation = -90
-                elif side == "y_max": rotation = 0
-                elif side == "y_min": rotation = 180
-                
-                t = QTransform().rotate(rotation)
-                qpoly = t.map(qpoly)
-                
-                item = self._scene.addPolygon(qpoly, pen, brush)
-                marker_items.append(item)
-                
-            elif bc_type == "roller_x" or bc_type == "roller_y":
-                # Roller symbol: Triangle with a line underneath
-                # If roller_x, it can't move X, so it rolls on a vertical wall? 
-                # Wait, "roller_x" usually means fixed in X, free in Y. So it rolls along the Y axis.
-                # Marker: triangle + small circles
-                is_vert = (bc_type == "roller_x") # Rollins along Y
-                
-                qtri = QPolygonF([QPointF(0, 0), QPointF(-SIZE/2, SIZE), QPointF(SIZE/2, SIZE)])
-                
-                rotation = 0
-                if side == "x_min": rotation = 90
-                elif side == "x_max": rotation = -90
-                elif side == "y_max": rotation = 0
-                elif side == "y_min": rotation = 180
-                
-                t = QTransform().rotate(rotation)
-                qtri = t.map(qtri)
-                
-                # Add triangle
-                item_tri = self._scene.addPolygon(qtri, pen, QBrush(Qt.NoBrush))
-                marker_items.append(item_tri)
-                
-                # Add two small rollers (circles)
-                r_size = SIZE/4
-                if side == "y_max":
-                    c1 = self._scene.addEllipse(-SIZE/2, SIZE, r_size, r_size, pen, brush)
-                    c2 = self._scene.addEllipse(SIZE/2 - r_size, SIZE, r_size, r_size, pen, brush)
-                    marker_items.append(c1); marker_items.append(c2)
-                elif side == "x_max":
-                    c1 = self._scene.addEllipse(SIZE, -SIZE/2, r_size, r_size, pen, brush)
-                    c2 = self._scene.addEllipse(SIZE, SIZE/2 - r_size, r_size, r_size, pen, brush)
-                    marker_items.append(c1); marker_items.append(c2)
-                elif side == "x_min":
-                    c1 = self._scene.addEllipse(-SIZE-r_size, -SIZE/2, r_size, r_size, pen, brush)
-                    c2 = self._scene.addEllipse(-SIZE-r_size, SIZE/2 - r_size, r_size, r_size, pen, brush)
-                    marker_items.append(c1); marker_items.append(c2)
-                elif side == "y_min":
-                    c1 = self._scene.addEllipse(-SIZE/2, -SIZE-r_size, r_size, r_size, pen, brush)
-                    c2 = self._scene.addEllipse(SIZE/2 - r_size, -SIZE-r_size, r_size, r_size, pen, brush)
-                    marker_items.append(c1); marker_items.append(c2)
-                else:
-                    c1 = self._scene.addEllipse(SIZE, -SIZE/2, r_size, r_size, pen, brush)
-                    c2 = self._scene.addEllipse(SIZE, SIZE/2 - r_size, r_size, r_size, pen, brush)
-                    marker_items.append(c1); marker_items.append(c2)
-
-            if marker_items:
-                group = self._scene.createItemGroup(marker_items)
-                group.setPos(x, y)
-                group.setZValue(30) # Above mesh & loads
-                self._bc_items.append(group)
-
-        # To avoid overcrowding, we only draw markers at a subset of boundary nodes if the mesh is dense
-        # But for professional FEA, seeing all boundary nodes is often preferred. 
-        # We'll skip every other mid-node for T15 if needed, but let's draw all first.
-        for i, (x, y) in enumerate(nodes):
-            if abs(y - y_min) < TOL: add_marker(x, y, bc_map["y_min"], "y_min")
-            if abs(y - y_max) < TOL: add_marker(x, y, bc_map["y_max"], "y_max")
-            if abs(x - x_min) < TOL: add_marker(x, y, bc_map["x_min"], "x_min")
-            if abs(x - x_max) < TOL: add_marker(x, y, bc_map["x_max"], "x_max")
-
     def _get_contourf_data(self, triang, values, levels):
         """Internal helper to bypass figure creation for tricontourf extraction."""
         import matplotlib.pyplot as plt
@@ -1030,98 +891,3 @@ class ResultCanvas(QGraphicsView):
 
         painter.restore()
 
-    def _render_loads(self):
-        """Render Point Loads and Line Loads if they are active in the current phase and not hidden."""
-        for item in self._load_items:
-            self._scene.removeItem(item)
-        self._load_items.clear()
-
-        current_phase = self._state.current_phase
-        if not current_phase:
-            return
-
-        active_ids = current_phase.get("active_load_ids", [])
-        hidden_ids = getattr(self._state, "result_hidden_loads", set())
-        
-        import math
-        
-        # 1. Point Loads
-        pen_pl = QColor('#ef4444')
-        for l in self._state.point_loads:
-            lid = l.get("id")
-            if lid not in active_ids or lid in hidden_ids:
-                continue
-            
-            px, py = l["x"], l["y"]
-            fx, fy = l.get("fx", 0), -l.get("fy", 0) # FY mapping logic typically assumes vertical axis
-            mag = math.sqrt(fx*fx + fy*fy)
-            if mag < 1e-5: continue
-            
-            ux, uy = fx/mag, -fy/mag
-            arrow_len = 1.0
-            tx, ty = px - ux * arrow_len, py - uy * arrow_len
-            
-            pen = QPen(pen_pl, 0)
-            pen.setCosmetic(True)
-            line = self._scene.addLine(tx, ty, px, py, pen)
-            line.setZValue(150)
-            line.setData(Qt.UserRole + 1, "point_load")
-            
-            perp_x, perp_y = -uy, ux
-            hw, hl = 0.2, 0.3
-            head_pts = [
-                QPointF(px, py),
-                QPointF(px - ux*hl + perp_x*hw, py - uy*hl + perp_y*hw),
-                QPointF(px - ux*hl - perp_x*hw, py - uy*hl - perp_y*hw)
-            ]
-            head_item = self._scene.addPolygon(QPolygonF(head_pts), pen, QBrush(pen_pl))
-            head_item.setZValue(150)
-            head_item.setData(Qt.UserRole + 1, "point_load")
-            self._load_items.extend([line, head_item])
-
-        # 2. Line Loads
-        pen_ll = QColor('#f97316')
-        for l in self._state.line_loads:
-            lid = l.get("id")
-            if lid not in active_ids or lid in hidden_ids:
-                continue
-            
-            x1, y1 = l["x1"], l["y1"]
-            x2, y2 = l["x2"], l["y2"]
-            fx, fy = l.get("fx", 0), -l.get("fy", 0)
-            mag = math.sqrt(fx*fx + fy*fy)
-            
-            pen = QPen(pen_ll, 0)
-            pen.setCosmetic(True)
-            
-            main_line = self._scene.addLine(x1, y1, x2, y2, pen)
-            main_line.setZValue(140)
-            main_line.setData(Qt.UserRole + 1, "line_load")
-            self._load_items.append(main_line)
-            
-            if mag < 1e-5: continue
-            
-            ux, uy = fx/mag, -fy/mag
-            num_ticks = 4
-            arrow_len, hw, hl = 0.6, 0.1, 0.15
-            perp_x, perp_y = -uy, ux
-            
-            for i in range(num_ticks + 1):
-                f = i / num_ticks
-                px = x1 + f * (x2 - x1)
-                py = y1 + f * (y2 - y1)
-                tx, ty = px - ux * arrow_len, py - uy * arrow_len
-                
-                tick = self._scene.addLine(tx, ty, px, py, pen)
-                tick.setZValue(140)
-                tick.setData(Qt.UserRole + 1, "line_load")
-                
-                head_pts = [
-                    QPointF(px, py),
-                    QPointF(px - ux*hl + perp_x*hw, py - uy*hl + perp_y*hw),
-                    QPointF(px - ux*hl - perp_x*hw, py - uy*hl - perp_y*hw)
-                ]
-                head_item = self._scene.addPolygon(QPolygonF(head_pts), pen, QBrush(pen_ll))
-                head_item.setZValue(140)
-                head_item.setData(Qt.UserRole + 1, "line_load")
-                self._load_items.extend([tick, head_item])

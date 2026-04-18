@@ -871,7 +871,7 @@ class TerraSimCanvas(QGraphicsView):
         transform.scale(0.015,-0.015)
 
         # 1. Draw Nodes
-        r = 0.1 # Compact
+        r = 0.01 # Compact
         for i, n in enumerate(nodes):
             x, y = n[0], n[1]
             ellipse = self._scene.addEllipse(x-r, y-r, r*2, r*2, pen, brush_node)
@@ -902,11 +902,25 @@ class TerraSimCanvas(QGraphicsView):
             self._node_markers[i] = ellipse
 
         # 2. Draw Gauss Points
-        gp_r = 0.06 # Compact
+        gp_r = 0.006 # Compact
         for i, el in enumerate(elements):
             if len(el) < 3: continue
             p1, p2, p3 = nodes[el[0]], nodes[el[1]], nodes[el[2]]
-            gps = [(1/6, 1/6, 2/3), (1/6, 2/3, 1/6), (2/3, 1/6, 1/6)]
+            
+            # 9-point Symmetrical Gauss Rule coordinates for T15 (Matching element_t15.py)
+            # Coordinates are in natural (xi, eta) where L1 = 1-xi-eta, L2=xi, L3=eta
+            # We map (L1, L2, L3) for barycentric placement
+            gps = [
+                (0.6667, 0.1666, 0.1666), # Node group 1
+                (0.1666, 0.6667, 0.1666),
+                (0.1666, 0.1666, 0.6667),
+                (0.4734, 0.0531, 0.4734), # Node group 2A
+                (0.4734, 0.4734, 0.0531),
+                (0.0531, 0.4734, 0.4734),
+                (0.8937, 0.0531, 0.0531), # Node group 2B
+                (0.0531, 0.8937, 0.0531),
+                (0.0531, 0.0531, 0.8937)
+            ]
             
             for gp_idx, (l1, l2, l3) in enumerate(gps):
                 gx = l1*p1[0] + l2*p2[0] + l3*p3[0]
@@ -971,8 +985,8 @@ class TerraSimCanvas(QGraphicsView):
         mesh_data : dict
             The MeshResponse from the backend, containing:
             - "nodes":    list of [x, y] coordinate pairs
-            - "elements": list of [n1, n2, n3, n4, n5, n6] (T6 triangles)
-                          where n1-n3 are corner nodes, n4-n6 are midside nodes.
+            - "elements": list of [n1, ..., n15] (T15 triangles)
+                          where n1-n3 are corner nodes.
 
         We only draw edges between the 3 corner nodes (n1, n2, n3) since
         the midside nodes are for quadratic interpolation, not geometry.
@@ -1011,25 +1025,31 @@ class TerraSimCanvas(QGraphicsView):
                 if poly_id is not None and poly_id not in active_indices:
                     continue
 
-            # T6 element: [n1, n2, n3, n4, n5, n6]
-            if len(elem) < 3:
+            # T15 element: [0, 1, 2 (corners), 3,4,5 (e12), 6,7,8 (e23), 9,10,11 (e31), 12,13,14 (int)]
+            if len(elem) < 15:
                 continue
 
-            # Get corner node indices (0-based)
-            i0, i1, i2 = elem[0], elem[1], elem[2]
-            if i0 >= len(nodes) or i1 >= len(nodes) or i2 >= len(nodes):
-                continue
+            # Draw complete perimeter sequence including mid-edge nodes
+            # Sequence: 0 -> 3 -> 4 -> 5 -> 1 -> 6 -> 7 -> 8 -> 2 -> 9 -> 10 -> 11 -> 0
+            perimeter_indices = [0, 3, 4, 5, 1, 6, 7, 8, 2, 9, 10, 11]
+            
+            # Start path at first node
+            start_node = nodes[elem[perimeter_indices[0]]]
+            batch_path.moveTo(start_node[0], start_node[1])
+            
+            # Line to subsequent boundary nodes
+            for p_idx in perimeter_indices[1:]:
+                next_node = nodes[elem[p_idx]]
+                batch_path.lineTo(next_node[0], next_node[1])
+            
+            # Close path back to node 0
+            batch_path.lineTo(start_node[0], start_node[1])
 
-            # Node coordinates
-            x0, y0 = nodes[i0][0], nodes[i0][1]
-            x1, y1 = nodes[i1][0], nodes[i1][1]
-            x2, y2 = nodes[i2][0], nodes[i2][1]
-
-            # Draw triangle edges
-            batch_path.moveTo(x0, y0)
-            batch_path.lineTo(x1, y1)
-            batch_path.lineTo(x2, y2)
-            batch_path.lineTo(x0, y0)
+            # Draw tiny markers for ALL 15 nodes in Mesh View (Compact Style)
+            node_r = 0.008 
+            for n_idx in elem:
+                nx, ny = nodes[n_idx][0], nodes[n_idx][1]
+                batch_path.addEllipse(nx - node_r, ny - node_r, node_r*2, node_r*2)
 
         # Add the complete path as a single QGraphicsPathItem
         if not batch_path.isEmpty():
