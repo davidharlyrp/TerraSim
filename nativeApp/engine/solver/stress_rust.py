@@ -1,15 +1,11 @@
 """
-Rust-Accelerated Stress Computation (Batch Kernel)
-
-Uses the terrasim_core.compute_stresses_loop() Rust function which runs
-the ENTIRE element stress computation loop in Rust, eliminating
-Python-Rust FFI overhead per element.
-
-This is a drop-in replacement for compute_elements_stresses_numba().
+Rust-accelerated stress computation for Quad9 elements (9 Gauss points).
 """
 import numpy as np
 
 import terrasim_core
+
+from .element_quad9 import NUM_GAUSS_POINTS
 
 
 def compute_elements_stresses_rust(
@@ -38,20 +34,11 @@ def compute_elements_stresses_rust(
     is_srm,
     is_gravity_phase,
     target_m_stage,
-    num_dof
+    num_dof,
 ):
-    """
-    Rust-accelerated stress computation using high-order T15 batch kernel.
-    
-    Reshapes B_matrices from (N,9,3,30) to (N*9,90) for Rust,
-    then calls terrasim_core.compute_stresses_loop() in a single FFI call.
-    """
     num_active = len(element_nodes_arr)
+    B_flat = B_matrices_arr.reshape(num_active * NUM_GAUSS_POINTS, 54)
 
-    # Reshape B_matrices for T15 high-order elements: (N, 12, 3, 30) -> (N*12, 90)
-    B_flat = B_matrices_arr.reshape(num_active * 12, 90)
-
-    # Ensure contiguous arrays with correct dtypes
     element_nodes_c = np.ascontiguousarray(element_nodes_arr, dtype=np.int64)
     total_u_c = np.ascontiguousarray(total_u_candidate, dtype=np.float64)
     step_start_stress_c = np.ascontiguousarray(step_start_stress_arr, dtype=np.float64)
@@ -65,7 +52,7 @@ def compute_elements_stresses_rust(
     mat_drainage_c = np.ascontiguousarray(mat_drainage_arr, dtype=np.int64)
     mat_model_c = np.ascontiguousarray(mat_model_arr, dtype=np.int64)
 
-    F_int, new_stresses, new_yield, new_strain, new_pwp_excess = terrasim_core.compute_stresses_loop(
+    return terrasim_core.compute_stresses_loop(
         element_nodes_c,
         total_u_c,
         step_start_stress_c,
@@ -93,5 +80,3 @@ def compute_elements_stresses_rust(
         float(target_m_stage),
         int(num_dof),
     )
-
-    return F_int, new_stresses, new_yield, new_strain, new_pwp_excess

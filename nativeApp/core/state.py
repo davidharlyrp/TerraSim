@@ -71,6 +71,8 @@ class ProjectState(QObject):
     # Mesh generation results
     mesh_response_changed = Signal(object)  # dict | None — MeshResponse from backend
     mesh_settings_changed = Signal(dict)    # dict — mesh_size, etc.
+    custom_overrides_changed = Signal(list)  # list[dict] — per-edge mesh overrides
+    mesh_edge_selection_changed = Signal(object)  # dict | None — selected polygon edge
     tracked_points_changed = Signal(list)   # list[dict] — nodes/GPs being tracked
 
     # Tool / interaction state
@@ -193,7 +195,13 @@ class ProjectState(QObject):
         self._mesh_settings: dict = {
             "mesh_size": 2.0,
             "boundary_refinement_factor": 1.0,
+            "element_type": "quad9",
+            "load_refinement_enabled": True,
+            "ebr_refinement_enabled": True,
         }
+        # Per-edge transfinite overrides: polygon_index, vertex_start, vertex_end, num_elements, bias
+        self._custom_overrides: list[dict] = []
+        self._selected_mesh_edge: dict | None = None
 
         # Tracked points for simulation output monitoring
         # Each: {"id", "type", "index", "gp_index", "label", "x", "y"}
@@ -404,6 +412,14 @@ class ProjectState(QObject):
         return dict(self._mesh_settings)
 
     @property
+    def custom_overrides(self) -> list[dict]:
+        return list(self._custom_overrides)
+
+    @property
+    def selected_mesh_edge(self) -> dict | None:
+        return self._selected_mesh_edge
+
+    @property
     def tracked_points(self) -> list[dict]:
         return list(self._tracked_points)
 
@@ -433,6 +449,7 @@ class ProjectState(QObject):
             "current_phase_index": self._current_phase_index,
             "settings": copy.deepcopy(self._settings),
             "mesh_settings": copy.deepcopy(self._mesh_settings),
+            "custom_overrides": copy.deepcopy(self._custom_overrides),
             "tracked_points": copy.deepcopy(self._tracked_points)
         }
         
@@ -483,6 +500,7 @@ class ProjectState(QObject):
         self._current_phase_index = snap.get("current_phase_index", 0)
         self._settings = copy.deepcopy(snap["settings"])
         self._mesh_settings = copy.deepcopy(snap["mesh_settings"])
+        self._custom_overrides = copy.deepcopy(snap.get("custom_overrides", []))
         self._tracked_points = copy.deepcopy(snap.get("tracked_points", []))
         
         if not self._phases:
@@ -500,6 +518,7 @@ class ProjectState(QObject):
         self.phases_changed.emit(self._phases)
         self.current_phase_changed.emit(self._current_phase_index)
         self.settings_changed.emit(self._settings)
+        self.custom_overrides_changed.emit(self._custom_overrides)
         self.tracked_points_changed.emit(self._tracked_points)
         
         # Clear selection on undo/redo to prevent ghost references
@@ -1192,6 +1211,61 @@ class ProjectState(QObject):
         self.mesh_settings_changed.emit(self._mesh_settings)
         self.state_changed.emit()
 
+    def set_custom_overrides(self, overrides: list[dict]) -> None:
+        self._custom_overrides = list(overrides)
+        self.custom_overrides_changed.emit(self._custom_overrides)
+        self.state_changed.emit()
+        self._push_snapshot("Update Mesh Edge Overrides")
+
+    def set_selected_mesh_edge(self, edge: dict | None) -> None:
+        self._selected_mesh_edge = edge
+        self.mesh_edge_selection_changed.emit(edge)
+
+    def upsert_mesh_edge_override(
+        self,
+        polygon_index: int,
+        vertex_start: int,
+        vertex_end: int,
+        num_elements: int,
+        bias: float = 1.0,
+    ) -> None:
+        """Create or update a custom_overrides entry for one polygon edge."""
+        key = (polygon_index, vertex_start, vertex_end)
+        rev_key = (polygon_index, vertex_end, vertex_start)
+        updated = []
+        found = False
+        for ov in self._custom_overrides:
+            k = (ov.get("polygon_index"), ov.get("vertex_start"), ov.get("vertex_end"))
+            if k == key or k == rev_key:
+                if not found:
+                    updated.append({
+                        "polygon_index": polygon_index,
+                        "vertex_start": vertex_start,
+                        "vertex_end": vertex_end,
+                        "num_elements": num_elements,
+                        "bias": bias,
+                    })
+                    found = True
+            else:
+                updated.append(ov)
+        if not found:
+            updated.append({
+                "polygon_index": polygon_index,
+                "vertex_start": vertex_start,
+                "vertex_end": vertex_end,
+                "num_elements": num_elements,
+                "bias": bias,
+            })
+        self.set_custom_overrides(updated)
+
+    def remove_mesh_edge_override(self, polygon_index: int, vertex_start: int, vertex_end: int) -> None:
+        key = (polygon_index, vertex_start, vertex_end)
+        rev_key = (polygon_index, vertex_end, vertex_start)
+        self.set_custom_overrides([
+            ov for ov in self._custom_overrides
+            if (ov.get("polygon_index"), ov.get("vertex_start"), ov.get("vertex_end")) not in (key, rev_key)
+        ])
+
     # ---- Tracked Points ----------------------------------------------------
 
     def set_tracked_points(self, points: list[dict]):
@@ -1350,6 +1424,7 @@ class ProjectState(QObject):
             "embedded_beams": embedded_beams_payload,
             "beam_materials": beam_materials_payload,
             "mesh_settings": dict(self._mesh_settings),
+            "custom_overrides": list(self._custom_overrides),
         }
 
     def get_solver_payload(self) -> dict:
@@ -1465,6 +1540,7 @@ class ProjectState(QObject):
             "solverResults": deep_dict(self._solver_results),
             "meshResponse": deep_dict(self._mesh_response),
             "meshSettings": dict(self._mesh_settings),
+            "customOverrides": list(self._custom_overrides),
             "trackedPoints": list(self._tracked_points),
             "settings": dict(self._settings),
             "outputType": self.output_type.value if hasattr(self.output_type, "value") else str(self.output_type),
@@ -1523,7 +1599,11 @@ class ProjectState(QObject):
         self._mesh_settings.update(data.get("meshSettings", {
             "mesh_size": 2.0,
             "boundary_refinement_factor": 1.0,
+            "element_type": "quad9",
+            "load_refinement_enabled": True,
+            "ebr_refinement_enabled": True,
         }))
+        self._custom_overrides = list(data.get("customOverrides", []))
         
         # UI/Engine persistent state
         self._settings.update(data.get("settings", {}))
@@ -1550,6 +1630,7 @@ class ProjectState(QObject):
         self.phases_changed.emit(self._phases)
         self.current_phase_changed.emit(self._current_phase_index)
         self.mesh_settings_changed.emit(self._mesh_settings)
+        self.custom_overrides_changed.emit(self._custom_overrides)
         self.mesh_response_changed.emit(self._mesh_response)
         self.tracked_points_changed.emit(self._tracked_points)
         self.tool_mode_changed.emit(self._tool_mode)
@@ -1579,5 +1660,9 @@ class ProjectState(QObject):
             "meshSettings": {
                 "mesh_size": 2.0,
                 "boundary_refinement_factor": 1.0,
-            }
+                "element_type": "quad9",
+                "load_refinement_enabled": True,
+                "ebr_refinement_enabled": True,
+            },
+            "customOverrides": [],
         })

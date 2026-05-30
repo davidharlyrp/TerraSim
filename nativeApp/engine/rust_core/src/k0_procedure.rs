@@ -1,11 +1,28 @@
 /// K0 Procedure — Initial stress computation for geostatic conditions.
 ///
-/// Computes vertical/horizontal effective and total stresses at all 12 Gauss points
-/// for T15 high-order elements. Includes O(N) surface detection and water level interpolation.
+/// K0 stresses at 9 Gauss points per Quad9 element.
 
 use numpy::ndarray::{Array2, Array3};
 use numpy::{PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
+
+#[inline]
+fn is_point_in_quad(px: f64, py: f64, x: &[f64; 4], y: &[f64; 4]) -> bool {
+    fn in_tri(
+        v1x: f64, v1y: f64, v2x: f64, v2y: f64, v3x: f64, v3y: f64, px: f64, py: f64,
+    ) -> bool {
+        let denom = (v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y);
+        if denom.abs() < 1e-12 {
+            return false;
+        }
+        let a = ((v2y - v3y) * (px - v3x) + (v3x - v2x) * (py - v3y)) / denom;
+        let b = ((v3y - v1y) * (px - v3x) + (v1x - v3x) * (py - v3y)) / denom;
+        let c = 1.0 - a - b;
+        a >= -1e-9 && b >= -1e-9 && c >= -1e-9
+    }
+    in_tri(x[0], y[0], x[1], y[1], x[2], y[2], px, py)
+        || in_tri(x[0], y[0], x[2], y[2], x[3], y[3], px, py)
+}
 
 #[inline]
 fn is_point_in_triangle(
@@ -46,14 +63,14 @@ fn get_water_y(x: f64, water_pts: &[[f64; 2]]) -> f64 {
     -1e15
 }
 
-/// K0 initial stress computation kernel for T15 high-order mesh.
+/// K0 initial stress computation kernel for Quad9 mesh.
 #[pyfunction]
 #[pyo3(name = "compute_k0_stresses")]
 pub fn compute_k0_stresses_py<'py>(
     py: Python<'py>,
-    gp_coords_all: PyReadonlyArray3<'py, f64>,    // (N, 12, 2)
+    gp_coords_all: PyReadonlyArray3<'py, f64>,    // (N, 9, 2)
     node_coords: PyReadonlyArray2<'py, f64>,       // (num_nodes, 2)
-    elem_nodes_corner: PyReadonlyArray2<'py, i32>, // (N, 3)
+    elem_nodes_corner: PyReadonlyArray2<'py, i32>, // (N, 4)
     elem_bboxes: PyReadonlyArray2<'py, f64>,       // (N, 4)
     rho_unsat: PyReadonlyArray1<'py, f64>,         // (N,)
     rho_sat: PyReadonlyArray1<'py, f64>,           // (N,)
@@ -87,11 +104,11 @@ pub fn compute_k0_stresses_py<'py>(
         water_pts.push([wp_flat[[i, 0]], wp_flat[[i, 1]]]);
     }
 
-    let mut results = Array3::<f64>::zeros((num_active, 12, 3));
-    let mut pwp_results = Array2::<f64>::zeros((num_active, 12));
+    let mut results = Array3::<f64>::zeros((num_active, 9, 3));
+    let mut pwp_results = Array2::<f64>::zeros((num_active, 9));
 
     for i in 0..num_active {
-        for gp_idx in 0..12usize {
+        for gp_idx in 0..9usize {
             let x_gp = gp[[i, gp_idx, 0]];
             let y_gp = gp[[i, gp_idx, 1]];
 
@@ -128,15 +145,14 @@ pub fn compute_k0_stresses_py<'py>(
                         if bboxes[[j, 0]] <= x_gp && x_gp <= bboxes[[j, 1]]
                             && bboxes[[j, 2]] <= y_sample && y_sample <= bboxes[[j, 3]]
                         {
-                            let n1 = corners[[j, 0]] as usize;
-                            let n2 = corners[[j, 1]] as usize;
-                            let n3 = corners[[j, 2]] as usize;
-                            if is_point_in_triangle(
-                                nodes[[n1, 0]], nodes[[n1, 1]],
-                                nodes[[n2, 0]], nodes[[n2, 1]],
-                                nodes[[n3, 0]], nodes[[n3, 1]],
-                                x_gp, y_sample,
-                            ) {
+                            let mut qx = [0.0; 4];
+                            let mut qy = [0.0; 4];
+                            for c in 0..4 {
+                                let ni = corners[[j, c]] as usize;
+                                qx[c] = nodes[[ni, 0]];
+                                qy[c] = nodes[[ni, 1]];
+                            }
+                            if is_point_in_quad(x_gp, y_sample, &qx, &qy) {
                                 let wy = get_water_y(x_gp, &water_pts);
                                 if wy > -1e14 && y_sample < wy {
                                     gamma_sample = if rho_s[j] > 0.0 { rho_s[j] } else { rho_u[j] };

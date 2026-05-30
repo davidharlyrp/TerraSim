@@ -26,6 +26,30 @@ def u_get(obj, key, default=None):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
+
+def _quad9_contour_triangles(elem: list) -> list[tuple]:
+    """
+    Subdivide a Quad9 into sub-triangles for matplotlib tricontourf.
+    Uses all 9 nodes (corner + midside + center) so contours are smooth quads, not T3 shards.
+    """
+    if len(elem) >= 9:
+        n = elem
+        return [
+            (n[0], n[4], n[8]),
+            (n[4], n[1], n[8]),
+            (n[1], n[5], n[8]),
+            (n[5], n[2], n[8]),
+            (n[2], n[6], n[8]),
+            (n[6], n[3], n[8]),
+            (n[3], n[7], n[8]),
+            (n[7], n[0], n[8]),
+        ]
+    if len(elem) >= 4:
+        n = elem
+        return [(n[0], n[1], n[2]), (n[0], n[2], n[3])]
+    return [tuple(elem[:3])]
+
+
 # Constants
 GRID_EXTENT  = 200.0
 POINT_RADIUS = 0.15
@@ -257,27 +281,39 @@ class ResultCanvas(QGraphicsView):
                 stress_gp_map = {} 
                 for s in phase_results["stresses"]:
                     eid = u_get(s, "element_id")
-                    if eid not in stress_gp_map: stress_gp_map[eid] = [None] * 12
+                    from engine.solver.element_quad9 import (
+                        GAUSS_POINTS_2D,
+                        NUM_GAUSS_POINTS,
+                        shape_functions_quad9,
+                    )
+                    if eid not in stress_gp_map:
+                        stress_gp_map[eid] = [None] * NUM_GAUSS_POINTS
                     gp_id = u_get(s, "gp_id", 1)
-                    if 1 <= gp_id <= 12: stress_gp_map[eid][gp_id-1] = s
+                    if 1 <= gp_id <= NUM_GAUSS_POINTS:
+                        stress_gp_map[eid][gp_id - 1] = s
 
-                # IDW extrapolated weights from 12 Dunavant GPs to 3 corner nodes for smooth contours
-                T15_EXTRAP = [
-                    [0.925, 0.001, 0.001, 0.015, 0.004, 0.004, 0.021, 0.003, 0.002, 0.021, 0.002, 0.003],
-                    [0.003, 0.001, 0.885, 0.005, 0.003, 0.014, 0.008, 0.002, 0.023, 0.003, 0.003, 0.050],
-                    [0.003, 0.885, 0.001, 0.005, 0.014, 0.003, 0.003, 0.050, 0.003, 0.008, 0.023, 0.002]
-                ]
                 for eid, gps in stress_gp_map.items():
-                    if None in gps: continue
-                    elem = elements[eid-1]
-                    pid = self._el_to_poly.get(eid-1)
-                    if pid in self._state.result_hidden_polygons: continue
-                    
+                    if None in gps:
+                        continue
+                    elem = elements[eid - 1]
+                    if len(elem) < 9:
+                        continue
+                    pid = self._el_to_poly.get(eid - 1)
+                    if pid in self._state.result_hidden_polygons:
+                        continue
+
                     gp_vals = [self._get_stress_value(g, out_type) for g in gps]
-                    
-                    for ni in range(3):
+                    node_accum = [0.0] * 9
+                    node_w = [0.0] * 9
+                    for gp_idx, (xi, eta) in enumerate(GAUSS_POINTS_2D):
+                        n_vals = shape_functions_quad9(xi, eta)
+                        for ni in range(9):
+                            node_accum[ni] += n_vals[ni] * gp_vals[gp_idx]
+                            node_w[ni] += n_vals[ni]
+
+                    for ni in range(9):
                         node_idx = elem[ni]
-                        val = sum(T15_EXTRAP[ni][k] * gp_vals[k] for k in range(12))
+                        val = node_accum[ni] / node_w[ni] if node_w[ni] > 1e-12 else 0.0
                         # Per-polygon key for sharp material boundary discontinuities
                         key = (node_idx, pid)
                         if key not in self._last_nodal_vals: self._last_nodal_vals[key] = [0.0, 0]
@@ -322,7 +358,7 @@ class ResultCanvas(QGraphicsView):
                 _invert_cmap = True
 
         # 7. PER-POLYGON CONTOUR GENERATION (Layer 1: Fills at Z=12)
-        # Exact replica of the proven T6 contour pipeline — uses only 3 corner nodes per element.
+        # Quad9: subdivide each element into 8 sub-triangles (all 9 nodes).
         if is_contour and self._last_nodal_vals:
             import matplotlib.tri as tri
             import matplotlib.cm as cm
@@ -347,8 +383,9 @@ class ResultCanvas(QGraphicsView):
                     involved_node_indices = set()
                     for idx in elem_indices:
                         e = elements[idx]
-                        subset_tri_indices.append(e[:3]) # Only corner nodes for triangulation
-                        involved_node_indices.update(e[:3]) # Only corners needed
+                        for tri_nodes in _quad9_contour_triangles(e):
+                            subset_tri_indices.append(tri_nodes)
+                        involved_node_indices.update(e[:9] if len(e) >= 9 else e[:4])
                     
                     sub_nodes_idx = sorted(list(involved_node_indices))
                     node_map = {old: new for new, old in enumerate(sub_nodes_idx)}
@@ -413,13 +450,19 @@ class ResultCanvas(QGraphicsView):
             if pid in self._state.result_hidden_polygons: continue
             if len(elem) < 3: continue
             
-            # Base coordinates (deformed)
+            # Base coordinates (deformed) — Quad9 perimeter or triangle fallback
             pts = []
-            for ni in range(3):
+            if len(elem) >= 9:
+                perimeter = [0, 4, 1, 5, 2, 6, 3, 7]
+            else:
+                perimeter = list(range(min(3, len(elem))))
+            for ni in perimeter:
                 n_idx = elem[ni]
                 x, y = nodes[n_idx][0], nodes[n_idx][1]
                 if n_idx in disp_map:
-                    dx, dy = disp_map[n_idx]; x += dx * scale; y += dy * scale
+                    dx, dy = disp_map[n_idx]
+                    x += dx * scale
+                    y += dy * scale
                 pts.append(QPointF(x, y))
 
             # --- Layer 1 Alternate: Material / Status Fills ---
@@ -438,30 +481,23 @@ class ResultCanvas(QGraphicsView):
                 item.setZValue(12); self._mesh_items.append(item)
 
             elif out_type == OutputType.YIELD_STATUS:
-                # Per-GP yield status: each of the 12 Dunavant GPs gets its own color
+                from engine.solver.element_quad9 import (
+                    NUM_GAUSS_POINTS,
+                    gauss_point_physical_coords,
+                )
                 eid = idx + 1
-                # Collect per-GP yield flags for this element
-                gp_yield_flags = [False] * 12
+                gp_yield_flags = [False] * NUM_GAUSS_POINTS
                 if phase_results and "stresses" in phase_results:
                     for s in phase_results["stresses"]:
                         if u_get(s, "element_id") == eid:
                             gp_id = u_get(s, "gp_id", 1)
-                            if 1 <= gp_id <= 12:
+                            if 1 <= gp_id <= NUM_GAUSS_POINTS:
                                 gp_yield_flags[gp_id - 1] = u_get(s, "is_yielded", False)
-                
-                # 12-point Dunavant GP natural coordinates (xi, eta)
-                from engine.solver.element_t15 import GAUSS_POINTS as GP_NAT
-                node_coords_elem = [nodes[elem[ni]] for ni in range(min(len(elem), 15))]
-                
-                for gp_idx in range(12):
-                    xi, eta = GP_NAT[gp_idx]
-                    # Barycentric: L1 = 1 - xi - eta, L2 = xi, L3 = eta
-                    L1 = 1.0 - xi - eta
-                    L2 = xi
-                    L3 = eta
-                    # Map to physical coords using corner nodes only
-                    gx = L1 * node_coords_elem[0][0] + L2 * node_coords_elem[1][0] + L3 * node_coords_elem[2][0]
-                    gy = L1 * node_coords_elem[0][1] + L2 * node_coords_elem[1][1] + L3 * node_coords_elem[2][1]
+
+                if len(elem) < 9:
+                    continue
+                for gp_idx in range(NUM_GAUSS_POINTS):
+                    gx, gy = gauss_point_physical_coords(nodes, elem, gp_idx)
                     
                     gp_fill = QBrush(QColor("#ef4444")) if gp_yield_flags[gp_idx] else QBrush(QColor("#10b981"))
                     
@@ -759,48 +795,52 @@ class ResultCanvas(QGraphicsView):
                 QToolTip.showText(global_pos, "Yield Point (Plastic)", self)
                 return
 
-        for elem in elements:
-            if len(elem) < 3: continue
-            v1, v2, v3 = nodes[elem[0]], nodes[elem[1]], nodes[elem[2]]
-            
-            # Fast BBox check first
-            min_x, max_x = min(v1[0], v2[0], v3[0]), max(v1[0], v2[0], v3[0])
-            min_y, max_y = min(v1[1], v2[1], v3[1]), max(v1[1], v2[1], v3[1])
-            
-            if not (min_x <= scene_pos.x() <= max_x and min_y <= scene_pos.y() <= max_y):
-                continue
-                
-            # Point in triangle test
-            def pt_in_tri(p, p0, p1, p2):
-                s = (p0[0] - p2[0]) * (p[1] - p2[1]) - (p0[1] - p2[1]) * (p[0] - p2[0])
-                t = (p1[0] - p0[0]) * (p[1] - p0[1]) - (p1[1] - p0[1]) * (p[0] - p0[0])
-                if (s < 0) != (t < 0) and s != 0 and t != 0: return False
-                d = (p2[0] - p1[0]) * (p[1] - p2[1]) - (p2[1] - p1[1]) * (p[0] - p2[0])
-                return (d < 0) == (s < 0) or d == 0
-                
-            if pt_in_tri((scene_pos.x(), scene_pos.y()), v1, v2, v3):
-                # Barycentric Interpolation for pinpoint accuracy
-                def get_barycentric(p, p1, p2, p3):
-                    denom = (p2[1]-p3[1])*(p1[0]-p3[0]) + (p3[0]-p2[0])*(p1[1]-p3[1])
-                    if abs(denom) < 1e-12: return 1/3, 1/3, 1/3
-                    w1 = ((p2[1]-p3[1])*(p[0]-p3[0]) + (p3[0]-p2[0])*(p[1]-p3[1])) / denom
-                    w2 = ((p3[1]-p1[1])*(p[0]-p3[0]) + (p1[0]-p3[0])*(p[1]-p3[1])) / denom
-                    w3 = 1.0 - w1 - w2
-                    return w1, w2, w3
+        def pt_in_tri(p, p0, p1, p2):
+            s = (p0[0] - p2[0]) * (p[1] - p2[1]) - (p0[1] - p2[1]) * (p[0] - p2[0])
+            t = (p1[0] - p0[0]) * (p[1] - p0[1]) - (p1[1] - p0[1]) * (p[0] - p0[0])
+            if (s < 0) != (t < 0) and s != 0 and t != 0:
+                return False
+            d = (p2[0] - p1[0]) * (p[1] - p2[1]) - (p2[1] - p1[1]) * (p[0] - p2[0])
+            return (d < 0) == (s < 0) or d == 0
 
-                w1, w2, w3 = get_barycentric((scene_pos.x(), scene_pos.y()), v1, v2, v3)
-                
-                # Retrieve individual nodal results aware of the current element's polygon
-                pid = self._el_to_poly.get(elements.index(elem))
+        def get_barycentric(p, p1, p2, p3):
+            denom = (p2[1] - p3[1]) * (p1[0] - p3[0]) + (p3[0] - p2[0]) * (p1[1] - p3[1])
+            if abs(denom) < 1e-12:
+                return 1 / 3, 1 / 3, 1 / 3
+            w1 = ((p2[1] - p3[1]) * (p[0] - p3[0]) + (p3[0] - p2[0]) * (p[1] - p3[1])) / denom
+            w2 = ((p3[1] - p1[1]) * (p[0] - p3[0]) + (p1[0] - p3[0]) * (p[1] - p3[1])) / denom
+            w3 = 1.0 - w1 - w2
+            return w1, w2, w3
+
+        px, py = scene_pos.x(), scene_pos.y()
+        for elem_idx, elem in enumerate(elements):
+            if len(elem) < 3:
+                continue
+            for t0, t1, t2 in _quad9_contour_triangles(elem):
+                v1, v2, v3 = nodes[t0], nodes[t1], nodes[t2]
+                min_x = min(v1[0], v2[0], v3[0])
+                max_x = max(v1[0], v2[0], v3[0])
+                min_y = min(v1[1], v2[1], v3[1])
+                max_y = max(v1[1], v2[1], v3[1])
+                if not (min_x <= px <= max_x and min_y <= py <= max_y):
+                    continue
+                if not pt_in_tri((px, py), v1, v2, v3):
+                    continue
+
+                pid = self._el_to_poly.get(elem_idx)
+
                 def _get_v_poly(ni, p):
                     r = self._last_nodal_vals.get((ni, p)) or self._last_nodal_vals.get((ni, None))
-                    return r[0]/r[1] if r else 0.0
+                    return r[0] / r[1] if r else 0.0
 
-                nv1 = _get_v_poly(elem[0], pid)
-                nv2 = _get_v_poly(elem[1], pid)
-                nv3 = _get_v_poly(elem[2], pid)
-                
-                found_val = w1*nv1 + w2*nv2 + w3*nv3
+                w1, w2, w3 = get_barycentric((px, py), v1, v2, v3)
+                found_val = (
+                    w1 * _get_v_poly(t0, pid)
+                    + w2 * _get_v_poly(t1, pid)
+                    + w3 * _get_v_poly(t2, pid)
+                )
+                break
+            if found_val is not None:
                 break
         
         if found_val is not None:

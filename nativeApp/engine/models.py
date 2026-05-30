@@ -112,9 +112,23 @@ class EmbeddedBeam(BaseModel):
     head_point_index: int = 0      # 0 for P1, 1 for P2
     head_connection_type: str = "FIXED" # "PIN" or "FIXED"
 
+class MeshElementType(str, Enum):
+    QUAD9 = "quad9"
+
+class BoundaryMeshOverride(BaseModel):
+    """Per-edge transfinite mesh control (maps to Gmsh Progression on a boundary curve)."""
+    polygon_index: int
+    vertex_start: int  # 0-based vertex index on polygon
+    vertex_end: int
+    num_elements: int = 10
+    bias: float = 1.0
+
 class MeshSettings(BaseModel):
     mesh_size: float = 2.0
     boundary_refinement_factor: float = 1.0
+    element_type: MeshElementType = MeshElementType.QUAD9
+    load_refinement_enabled: bool = True
+    ebr_refinement_enabled: bool = True
 
 class MeshRequest(BaseModel):
     polygons: List[PolygonData]
@@ -122,6 +136,7 @@ class MeshRequest(BaseModel):
     pointLoads: List[PointLoad]
     lineLoads: Optional[List[LineLoad]] = []
     mesh_settings: Optional[MeshSettings] = MeshSettings()
+    custom_overrides: Optional[List[BoundaryMeshOverride]] = []
     # water_level removed. Use water_levels.
     water_levels: Optional[List[WaterLevel]] = [] # NEW
     embedded_beams: Optional[List[EmbeddedBeam]] = [] # NEW
@@ -157,7 +172,8 @@ class EmbeddedBeamAssignment(BaseModel):
 class MeshResponse(BaseModel):
     success: bool
     nodes: List[List[float]] # [[x, y], ...]
-    elements: List[List[int]] # [[n1, ..., n15], ...] 0-based, 15-node quartic triangles
+    elements: List[List[int]] # Quad9: 9 nodes per element (0-based)
+    element_type: MeshElementType = MeshElementType.QUAD9
     boundary_conditions: BoundaryConditionsResponse
     point_load_assignments: List[PointLoadAssignment]
     line_load_assignments: List[LineLoadAssignment]

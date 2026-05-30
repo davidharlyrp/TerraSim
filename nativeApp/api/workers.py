@@ -15,7 +15,6 @@ from PySide6.QtCore import QThread, Signal
 # Import local engine components
 from engine.models import MeshRequest, SolverRequest
 from engine.mesh_generator import generate_mesh
-from engine.solver.phase_solver import solve_phases
 
 class MeshWorker(QThread):
     """
@@ -54,7 +53,8 @@ class MeshWorker(QThread):
             req = MeshRequest(**self._payload)
             
             # 2. Run engine logic
-            self.progress.emit("Triangulating geometry...")
+            et = (req.mesh_settings.element_type.value if req.mesh_settings and req.mesh_settings.element_type else "quad9")
+            self.progress.emit(f"Generating {et} mesh...")
             response = generate_mesh(req)
 
             # 3. Handle results
@@ -111,6 +111,8 @@ class SolveWorker(QThread):
     def run(self):
         """Run the solver engine loop."""
         try:
+            from engine.solver.phase_solver import solve_phases
+
             # 1. Convert dict payload to SolverRequest Pydantic model
             req = SolverRequest(**self._payload)
             

@@ -3,7 +3,7 @@ Solver Package
 Modular FEA solver with Rust-accelerated compute kernels (terrasim_core).
 
 Main Components:
-- element_t6: T6 element shape functions, B-matrix, stiffness
+- element_quad9: Quad9 element shape functions, B-matrix, stiffness
 - element_embedded_beam: Embedded beam stiffness and yielding
 - k0_procedure: Geostatic initial stress (K0)
 - stress_rust: Rust batch stress computation kernel

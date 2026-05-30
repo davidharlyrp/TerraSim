@@ -31,8 +31,13 @@ except ImportError:
 # from scipy.sparse.linalg import spsolve
 
 from numba import njit
-from .element_t15 import compute_element_matrices_t15, GAUSS_WEIGHTS
-from .k0_procedure import compute_vertical_stress_k0_t15
+from .element_quad9 import (
+    compute_element_matrices_quad9,
+    GAUSS_WEIGHTS_2D,
+    NUM_GAUSS_POINTS,
+    quad9_corner_area,
+)
+from .k0_procedure import compute_vertical_stress_k0_quad9
 from .element_embedded_beam import (
     compute_beam_element_matrix, 
     compute_beam_internal_force_yield,
@@ -156,7 +161,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
     current_water_level_data = default_water_level
     current_water_level_id = "default_legacy"
 
-    # Pre-calculate all element matrices (Initial state) - T15 Elements
+    # Pre-calculate all element matrices (Initial state) — Quad9
     for i, elem_nodes in enumerate(elements):
         elem_id = i + 1
         # Find element metadata
@@ -166,22 +171,20 @@ def solve_phases(request: SolverRequest, should_stop=None):
         mat = elem_meta.material
         poly_id = elem_meta.polygon_id
         
-        # T15 elements have 15 nodes
-        if len(elem_nodes) != 15:
-            log.append(f"ERROR: Element {elem_id} does not have 15 nodes (T15 required). Skipping.")
+        # Quad9 elements have 9 nodes
+        if len(elem_nodes) != 9:
+            log.append(f"ERROR: Element {elem_id} does not have 9 nodes (Quad9 required). Skipping.")
             continue
             
-        coords = np.array([nodes[n] for n in elem_nodes])  # (15, 2)
+        coords = np.array([nodes[n] for n in elem_nodes])  # (9, 2)
         # Use initial/default water level for first pass. kh/kv default to 0.0 for initial setup.
-        K_el, F_grav, gauss_point_data, D = compute_element_matrices_t15(
+        K_el, F_grav, gauss_point_data, D = compute_element_matrices_quad9(
             coords, mat, water_level=default_water_level, kh=0.0, kv=0.0
         )
         
         if K_el is None: continue
         
-        # Calculate element area (using first 3 corner nodes)
-        c = coords[:3]
-        area = 0.5 * abs(c[0][0]*(c[1][1]-c[2][1]) + c[1][0]*(c[2][1]-c[0][1]) + c[2][0]*(c[0][1]-c[1][1]))
+        area = quad9_corner_area(coords)
             
         elem_props_all.append({
             'id': elem_id,
@@ -191,7 +194,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             'F_grav': F_grav,
             'material': mat,
             'polygon_id': poly_id,
-            'gauss_points': gauss_point_data,  # List of 9 Gauss point dicts
+            'gauss_points': gauss_point_data,
             'area': area,
             'original_material': mat
         })
@@ -282,12 +285,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     'head_connection_type': head_conn_type
                 })
 
-    # Global State Tracking - T15: Store state per Gauss Point (List of 12 items per element)
+    # Global state per Gauss point (9 per Quad9 element)
     total_displacement = np.zeros(num_dof)
-    element_stress_state = {ep['id']: [np.zeros(3) for _ in range(12)] for ep in elem_props_all}
-    element_strain_state = {ep['id']: [np.zeros(3) for _ in range(12)] for ep in elem_props_all}
-    element_yield_state = {ep['id']: [False for _ in range(12)] for ep in elem_props_all}
-    element_pwp_excess_state = {ep['id']: [0.0 for _ in range(12)] for ep in elem_props_all}
+    element_stress_state = {ep['id']: [np.zeros(3) for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
+    element_strain_state = {ep['id']: [np.zeros(3) for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
+    element_yield_state = {ep['id']: [False for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
+    element_pwp_excess_state = {ep['id']: [0.0 for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
     
     phase_results = []
     
@@ -519,9 +522,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     coords = np.array([nodes[n] for n in ep['nodes']])
                     
                     # Store old gravity force before recomputing
-                    old_F_grav = ep['F_grav'].copy() if ep['F_grav'] is not None else np.zeros(30)
+                    old_F_grav = ep['F_grav'].copy() if ep['F_grav'] is not None else np.zeros(18)
                     
-                    K_el, F_grav, gauss_point_data, D = compute_element_matrices_t15(
+                    K_el, F_grav, gauss_point_data, D = compute_element_matrices_quad9(
                         coords, target_mat, water_level=current_water_level_data
                     )
                     
@@ -589,27 +592,27 @@ def solve_phases(request: SolverRequest, should_stop=None):
 
         # Handle K0 Procedure
         if phase.phase_type == PhaseType.K0_PROCEDURE:
-            msg_k0 = "Running K0 Procedure for stress initialization (T15)..."
+            msg_k0 = "Running K0 Procedure for stress initialization (Quad9)..."
             log.append(msg_k0)
             yield {"type": "log", "content": msg_k0}
             print(msg_k0)
             
             # Initial Stresses for GRAVITY or PLASTIC (Restart logic)
-            # Use T15 geostatic procedure
-            initial_stresses = compute_vertical_stress_k0_t15(
+            # Quad9 geostatic procedure
+            initial_stresses = compute_vertical_stress_k0_quad9(
                 active_elem_props, nodes, current_water_level_data
             )
             
             # Update global state
             for eid, gp_stresses in initial_stresses.items():
                 # gp_stresses is dict {'gp1': array, ...}
-                # Store as list [gp1_stress, ..., gp12_stress]
+                # Store as list [gp1_stress, ..., gp9_stress]
                 element_stress_state[eid] = [
-                    gp_stresses[f'gp{i+1}'] for i in range(12)
+                    gp_stresses[f'gp{i+1}'] for i in range(NUM_GAUSS_POINTS)
                 ]
                 # Strain remains zero
-                element_strain_state[eid] = [np.zeros(3) for _ in range(12)]
-                element_yield_state[eid] = [False for _ in range(12)]
+                element_strain_state[eid] = [np.zeros(3) for _ in range(NUM_GAUSS_POINTS)]
+                element_yield_state[eid] = [False for _ in range(NUM_GAUSS_POINTS)]
             
             # Reset Displacements (K0 procedure generates stress without deformation)
             total_displacement = np.zeros(num_dof)
@@ -620,8 +623,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
             
             for ep in active_elem_props:
                 eid = ep['id']
-                # Loop over Gauss points (T15 = 12 GPs)
-                for i in range(12):
+                # Loop over Gauss points (Quad9 = 9 GPs)
+                for i in range(NUM_GAUSS_POINTS):
                     gp_data = ep['gauss_points'][i]
                     sig = element_stress_state[eid][i]
                     pwp_val = gp_data['pwp']
@@ -706,12 +709,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
             # Build adjacency graph
             adj = {n: [] for n in active_nodes_set}
             
-            # Add Soil Element Connectivity (T15 uses all 15 nodes)
+            # Add soil element connectivity (all 9 nodes)
             for ep in active_elem_props:
                 enodes = ep['nodes']
-                for i in range(15):
+                for i in range(9):
                     u = enodes[i]
-                    for j in range(i+1, 15):
+                    for j in range(i + 1, 9):
                         v = enodes[j]
                         if u in adj and v in adj:
                             adj[u].append(v)
@@ -838,7 +841,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             
             if is_active_now and not was_active_before:
                 # Newly activated -> Add full gravity
-                for li in range(15):
+                for li in range(9):
                     gi = ep['nodes'][li]
                     delta_F_external[gi*3] += ep['F_grav'][li*2]
                     delta_F_external[gi*3+1] += ep['F_grav'][li*2+1]
@@ -854,7 +857,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                          
             elif was_active_before and not is_active_now:
                 # Deactivated -> Subtract its gravity (it's gone)
-                for li in range(15):
+                for li in range(9):
                     gi = ep['nodes'][li]
                     delta_F_external[gi*3] -= ep['F_grav'][li*2]
                     delta_F_external[gi*3+1] -= ep['F_grav'][li*2+1]
@@ -892,10 +895,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
             if poly_id in parent_active_indices and poly_id not in current_active_indices:
                 eid = ep['id']
                 # Iterate over Gauss points to integrate internal force
-                f_int_el = np.zeros(30)
+                f_int_el = np.zeros(18)
                 gp_stresses = element_stress_state[eid]
                 
-                for gp_idx in range(12):
+                for gp_idx in range(NUM_GAUSS_POINTS):
                     sigma_gp = gp_stresses[gp_idx]
                     gp_data = ep['gauss_points'][gp_idx]
                     weight = gp_data['weight']
@@ -905,7 +908,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     # f = B^T * sigma * detJ * weight * thickness
                     f_int_el += B_gp.T @ sigma_gp * det_J * weight * 1.0 # thickness=1
                 
-                for li in range(15):
+                for li in range(9):
                     gi = ep['nodes'][li]
                     # We ADD the release force because the boundary is now MISSING 
                     # the support from this element.
@@ -953,14 +956,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         L = np.linalg.norm(p_end - p_start)
                         f_total = np.array([fx, fy]) * L
                         
-                        if len(nodes_idx) == 5:
-                            # Quartic edge (T15): Boole's rule weights [7, 7, 32, 12, 32] / 90
-                            w = [7/90, 7/90, 32/90, 12/90, 32/90]
-                            for i in range(5):
-                                gi = nodes_idx[i]
-                                target_vector[gi*3] += f_total[0] * w[i]
-                                target_vector[gi*3+1] += f_total[1] * w[i]
-                        elif len(nodes_idx) == 3:
+                        if len(nodes_idx) == 3:
                             # Quadratic edge (T6): Simpson's rule weights [1/6, 1/6, 2/3]
                             w = [1/6, 1/6, 2/3]
                             for i in range(3):
@@ -1003,14 +999,14 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 
                 # Re-calculate current target F_grav
                 coords = np.array([nodes[n] for n in ep['nodes']])
-                _, F_grav_curr, _, _ = compute_element_matrices_t15(
+                _, F_grav_curr, _, _ = compute_element_matrices_quad9(
                     coords, ep['material'], water_level=current_water_level_data,
                     kh=kh_curr, kv=kv_curr
                 )
                 
                 if poly_id in parent_active_indices and poly_id in current_active_indices:
                     # Remaining active -> Apply increment
-                    for li in range(15):
+                    for li in range(9):
                         gi = ep['nodes'][li]
                         delta_F_external[gi*3] += (F_grav_curr[li*2] - ep['F_grav'][li*2])
                         delta_F_external[gi*3+1] += (F_grav_curr[li*2+1] - ep['F_grav'][li*2+1])
@@ -1045,9 +1041,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
         for ep in active_elem_props:
             eid = ep['id']
             gp_stresses = element_stress_state[eid]
-            f_int_el = np.zeros(30) # 15 nodes * 2 DOF
+            f_int_el = np.zeros(18)
             
-            for gp_idx in range(12):
+            for gp_idx in range(NUM_GAUSS_POINTS):
                 sigma_gp = gp_stresses[gp_idx]
                 gp_data = ep['gauss_points'][gp_idx]
                 weight = gp_data['weight']
@@ -1058,7 +1054,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 th = ep.get('thickness', 1.0)
                 f_int_el += B_gp.T @ sigma_gp * det_J * weight * th
             
-            for li in range(15):
+            for li in range(9):
                 gi = ep['nodes'][li]
                 F_int_initial[gi*3] += f_int_el[li*2]
                 F_int_initial[gi*3+1] += f_int_el[li*2+1]
@@ -1143,12 +1139,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
         phase_yield_history = {eid: [y for y in ls] for eid, ls in element_yield_state.items()}
         phase_pwp_excess_history = {eid: [p for p in ls] for eid, ls in element_pwp_excess_state.items()}
         
-        # Tangent Stiffness Matrix cache (List of 12 matrices per element)
+        # Tangent stiffness per Gauss point (9 per element)
         element_tangent_matrices = {}
         for ep in active_elem_props:
             D_init_gps = []
             mat = ep['material']
-            for gp_idx in range(12):
+            for gp_idx in range(NUM_GAUSS_POINTS):
                 D_gp = ep['D'].copy()
                 if mat.drainage_type in [DrainageType.UNDRAINED_A, DrainageType.UNDRAINED_B]:
                     # Add volumetric stiffening (Penalty Bulk Modulus of Water)
@@ -1177,7 +1173,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         B_matrices_arr = np.array([[gp['B'] for gp in ep['gauss_points']] for ep in active_elem_props])
         det_J_arr = np.array([[gp['det_J'] for gp in ep['gauss_points']] for ep in active_elem_props])
         pwp_static_arr = np.array([[gp['pwp'] or 0.0 for gp in ep['gauss_points']] for ep in active_elem_props])
-        weights_arr = GAUSS_WEIGHTS
+        weights_arr = GAUSS_WEIGHTS_2D
         D_elastic_arr = np.array([ep['D'] for ep in active_elem_props])
         
         # Drainage mapping: 0: DRAINED, 1: UNDRAINED_A, 2: UNDRAINED_B, 3: UNDRAINED_C, 4: NON_POROUS
@@ -1306,7 +1302,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         def _assemble_stiffness():
             _active_elem_D_tangent_arr = np.array([element_tangent_matrices[ep['id']] for ep in active_elem_props])
             _D_flat = _active_elem_D_tangent_arr.reshape(-1, 9)
-            _B_flat = B_matrices_arr.reshape(-1, 90)
+            _B_flat = B_matrices_arr.reshape(-1, 54)
             
             _K_values = terrasim_core.assemble_stiffness_loop(
                 np.ascontiguousarray(_D_flat, dtype=np.float64),
@@ -1411,10 +1407,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = res_stab[1:]
                         for i, ep in enumerate(active_elem_props):
                             eid = ep['id']
-                            element_stress_state[eid] = [new_stresses_arr[i, gp].copy() for gp in range(12)]
-                            element_yield_state[eid] = [new_yield_arr[i, gp] for gp in range(12)]
-                            element_strain_state[eid] = [new_strain_arr[i, gp].copy() for gp in range(12)]
-                            element_pwp_excess_state[eid] = [new_pwp_excess_arr[i, gp] for gp in range(12)]
+                            element_stress_state[eid] = [new_stresses_arr[i, gp].copy() for gp in range(NUM_GAUSS_POINTS)]
+                            element_yield_state[eid] = [new_yield_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
+                            element_strain_state[eid] = [new_strain_arr[i, gp].copy() for gp in range(NUM_GAUSS_POINTS)]
+                            element_pwp_excess_state[eid] = [new_pwp_excess_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
                         msg_pre_ok = f"  > Stabilization converged at iteration {pre_iter+1}."
                         log.append(msg_pre_ok); yield {"type": "log", "content": msg_pre_ok}
                         break
@@ -1464,8 +1460,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     # Reshape (N, 9, 3, 3) -> (N*9, 9) for Rust consumption
                     _D_flat = _active_elem_D_tangent_arr.reshape(-1, 9)
                     
-                    # Reshape (N, 9, 3, 3, 30) -> (N*9, 90) for Rust stiffness assembly
-                    _B_flat = B_matrices_arr.reshape(-1, 90)
+                    # Reshape tangent D per GP for Rust stiffness assembly
+                    _B_flat = B_matrices_arr.reshape(-1, 54)
                     
                     _K_values = terrasim_core.assemble_stiffness_loop(
                         np.ascontiguousarray(_D_flat, dtype=np.float64),
@@ -1483,7 +1479,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     _stab_vals = np.full(num_nodes * 3, 1e-9, dtype=np.float64)
                     
                     # GLOBAL RZ STABILIZATION: Prevent singularity for rotation DOFs
-                    # Soil elements (T15) provide 0 rotational stiffness, which makes the 
+                    # Soil elements provide 0 rotational stiffness, which makes the 
                     # global matrix singular for the thousands of nodes not connected to beams.
                     _stab_vals[2::3] = 1.0
 
@@ -1557,10 +1553,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     
                     # Re-map stress data
                     new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = al_result['stress_data']
-                    temp_phase_stress = {ep['id']: [new_stresses_arr[i, gp] for gp in range(12)] for i, ep in enumerate(active_elem_props)}
-                    temp_phase_yield = {ep['id']: [new_yield_arr[i, gp] for gp in range(12)] for i, ep in enumerate(active_elem_props)}
-                    temp_phase_strain = {ep['id']: [new_strain_arr[i, gp] for gp in range(12)] for i, ep in enumerate(active_elem_props)}
-                    temp_phase_pwp_excess = {ep['id']: [new_pwp_excess_arr[i, gp] for gp in range(12)] for i, ep in enumerate(active_elem_props)}
+                    temp_phase_stress = {ep['id']: [new_stresses_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
+                    temp_phase_yield = {ep['id']: [new_yield_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
+                    temp_phase_strain = {ep['id']: [new_strain_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
+                    temp_phase_pwp_excess = {ep['id']: [new_pwp_excess_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
                 else:
                     # ARC LENGTH FAILURE -> Retry with smaller radius
                     msg_fail = f"  > Arc-Length failed at {m_type} {current_m_stage:.4f}: {al_result.get('error', 'Non-convergence')}"
@@ -1675,8 +1671,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     # Reshape (N, 9, 3, 3) -> (N*9, 9) for Rust consumption
                     _D_flat = active_elem_D_tangent_arr.reshape(-1, 9)
                     
-                    # Reshape B-matrices to (N*9, 90) for Rust
-                    _B_flat = B_matrices_arr.reshape(-1, 90)
+                    # Reshape B-matrices to (N*9, 54) for Rust
+                    _B_flat = B_matrices_arr.reshape(-1, 54)
                     
                     K_values = terrasim_core.assemble_stiffness_loop(
                         np.ascontiguousarray(_D_flat, dtype=np.float64),
@@ -1801,10 +1797,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 temp_phase_pwp_excess = {}
                 for i, ep in enumerate(active_elem_props):
                     eid = ep['id']
-                    temp_phase_stress[eid] = [new_stresses_arr[i, gp] for gp in range(12)]
-                    temp_phase_yield[eid] = [new_yield_arr[i, gp] for gp in range(12)]
-                    temp_phase_strain[eid] = [new_strain_arr[i, gp] for gp in range(12)]
-                    temp_phase_pwp_excess[eid] = [new_pwp_excess_arr[i, gp] for gp in range(12)]
+                    temp_phase_stress[eid] = [new_stresses_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
+                    temp_phase_yield[eid] = [new_yield_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
+                    temp_phase_strain[eid] = [new_strain_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
+                    temp_phase_pwp_excess[eid] = [new_pwp_excess_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
 
                 step_count += 1
                 current_u_incremental = trial_u
@@ -2067,12 +2063,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
         for ep in active_elem_props:
             eid = ep['id']
             # Get list of Gauss point states
-            sig_list = phase_stress_history.get(eid, element_stress_state.get(eid, [np.zeros(3)]*12))
-            yld_list = phase_yield_history.get(eid, element_yield_state.get(eid, [False]*12))
-            strain_list = phase_strain_history.get(eid, element_strain_state.get(eid, [np.zeros(3)]*12))
-            pwp_excess_list = phase_pwp_excess_history.get(eid, element_pwp_excess_state.get(eid, [0.0]*12))
+            sig_list = phase_stress_history.get(eid, element_stress_state.get(eid, [np.zeros(3)] * NUM_GAUSS_POINTS))
+            yld_list = phase_yield_history.get(eid, element_yield_state.get(eid, [False] * NUM_GAUSS_POINTS))
+            strain_list = phase_strain_history.get(eid, element_strain_state.get(eid, [np.zeros(3)] * NUM_GAUSS_POINTS))
+            pwp_excess_list = phase_pwp_excess_history.get(eid, element_pwp_excess_state.get(eid, [0.0] * NUM_GAUSS_POINTS))
             
-            for gp_idx in range(12):
+            for gp_idx in range(NUM_GAUSS_POINTS):
                 gp_data = ep['gauss_points'][gp_idx]
                 sig = sig_list[gp_idx]
                 eps = strain_list[gp_idx]

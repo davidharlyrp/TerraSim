@@ -23,6 +23,7 @@
 # ===========================================================================
 
 from __future__ import annotations
+import math
 import time
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
@@ -206,6 +207,8 @@ class TerraSimCanvas(QGraphicsView):
         self._state.embedded_beams_changed.connect(self._on_embedded_beams_changed)
         self._state.beam_materials_changed.connect(lambda m: self._on_embedded_beams_changed(self._state.embedded_beams))
         self._state.selection_changed.connect(self._on_selection_changed)
+        self._state.custom_overrides_changed.connect(lambda _: self._render_mesh_edge_highlights())
+        self._state.mesh_edge_selection_changed.connect(lambda _: self._render_mesh_edge_highlights())
 
         # Track committed polygon items for re-rendering
         self._polygon_items: list[QGraphicsPolygonItem] = []
@@ -214,6 +217,7 @@ class TerraSimCanvas(QGraphicsView):
 
         # Track mesh wireframe items (drawn after backend returns mesh)
         self._mesh_items: list[QGraphicsPathItem] = []
+        self._mesh_edge_highlight_items: list[QGraphicsPathItem] = []
         
         # Track pickable markers for PICK_POINT mode
         self._pickable_items: list[QGraphicsItem] = []
@@ -274,6 +278,9 @@ class TerraSimCanvas(QGraphicsView):
         # Auto-deactivate PICK_POINT if leaving MESH tab (Reset to last save)
         if tab_name != "MESH" and self._state.tool_mode == "PICK_POINT":
             self._state.rollback_tracked_points()
+            self._state.set_tool_mode("SELECT")
+        if tab_name != "MESH" and self._state.tool_mode == "PICK_POLYGON_EDGE":
+            self._state.set_selected_mesh_edge(None)
             self._state.set_tool_mode("SELECT")
 
         # Refresh persistent tracked points (MESH ONLY)
@@ -480,6 +487,10 @@ class TerraSimCanvas(QGraphicsView):
         if mode == "PICK_POINT":
             self.setCursor(Qt.PointingHandCursor)
             self._show_pickable_points()
+        elif mode == "PICK_POLYGON_EDGE":
+            self.setCursor(Qt.PointingHandCursor)
+            self._clear_pickable_points()
+            self._render_mesh_edge_highlights()
         else:
             # Clear interactive markers for all other modes
             self._clear_pickable_points()
@@ -605,6 +616,84 @@ class TerraSimCanvas(QGraphicsView):
 
         # Re-apply selection styling if active
         self._on_selection_changed(self._state.selected_entity)
+        self._render_mesh_edge_highlights()
+
+    def _render_mesh_edge_highlights(self):
+        """Draw custom_overrides and selected polygon edge on MESH tab."""
+        for item in self._mesh_edge_highlight_items:
+            self._scene.removeItem(item)
+        self._mesh_edge_highlight_items.clear()
+
+        if self._state.active_tab != "MESH":
+            return
+
+        def _draw_edge(poly_idx: int, vs: int, ve: int, color: QColor, width: float = 2.0):
+            poly = self._state.polygons[poly_idx]
+            verts = poly.get("vertices", [])
+            if not verts:
+                return
+            n = len(verts)
+            a = verts[vs % n]
+            b = verts[ve % n]
+            path = QPainterPath()
+            path.moveTo(a["x"], a["y"])
+            path.lineTo(b["x"], b["y"])
+            pen = QPen(color, 0)
+            pen.setCosmetic(True)
+            pen.setWidthF(width)
+            item = self._scene.addPath(path, pen)
+            item.setZValue(95)
+            self._mesh_edge_highlight_items.append(item)
+
+        override_pen = QColor("#f59e0b")
+        select_pen = QColor("#2563eb")
+
+        for ov in self._state.custom_overrides:
+            pi = ov.get("polygon_index", -1)
+            if 0 <= pi < len(self._state.polygons):
+                _draw_edge(pi, ov.get("vertex_start", 0), ov.get("vertex_end", 0), override_pen, 2.5)
+
+        edge = self._state.selected_mesh_edge
+        if edge:
+            pi = edge.get("polygon_index", -1)
+            if 0 <= pi < len(self._state.polygons):
+                _draw_edge(
+                    pi, edge.get("vertex_start", 0), edge.get("vertex_end", 0), select_pen, 3.5
+                )
+
+    def _pick_polygon_edge_at(self, scene_pos: QPointF) -> dict | None:
+        """Return closest polygon edge within tolerance of scene_pos."""
+        px, py = scene_pos.x(), scene_pos.y()
+        best = None
+        best_dist = 0.35
+
+        def _pt_seg_dist(px, py, x1, y1, x2, y2):
+            dx, dy = x2 - x1, y2 - y1
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq < 1e-12:
+                return math.hypot(px - x1, py - y1)
+            t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / seg_len_sq))
+            proj_x = x1 + t * dx
+            proj_y = y1 + t * dy
+            return math.hypot(px - proj_x, py - proj_y)
+
+        for pi, poly in enumerate(self._state.polygons):
+            verts = poly.get("vertices", [])
+            n = len(verts)
+            if n < 2:
+                continue
+            for j in range(n):
+                v1 = verts[j]
+                v2 = verts[(j + 1) % n]
+                d = _pt_seg_dist(px, py, v1["x"], v1["y"], v2["x"], v2["y"])
+                if d < best_dist:
+                    best_dist = d
+                    best = {
+                        "polygon_index": pi,
+                        "vertex_start": j,
+                        "vertex_end": (j + 1) % n,
+                    }
+        return best
 
     def _on_embedded_beams_changed(self, beams: list[dict]):
         """Render structural beams as lines colored by material."""
@@ -902,31 +991,23 @@ class TerraSimCanvas(QGraphicsView):
             self._node_markers[i] = ellipse
 
         # 2. Draw Gauss Points
-        gp_r = 0.006 # Compact
+        gp_r = 0.006  # Compact
+        element_type = mesh.get("element_type", "quad9")
+
         for i, el in enumerate(elements):
-            if len(el) < 3: continue
-            p1, p2, p3 = nodes[el[0]], nodes[el[1]], nodes[el[2]]
-            
-            # 9-point Symmetrical Gauss Rule coordinates for T15 (Matching element_t15.py)
-            # Coordinates are in natural (xi, eta) where L1 = 1-xi-eta, L2=xi, L3=eta
-            # We map (L1, L2, L3) for barycentric placement
-            gps = [
-                (0.6667, 0.1666, 0.1666), # Node group 1
-                (0.1666, 0.6667, 0.1666),
-                (0.1666, 0.1666, 0.6667),
-                (0.4734, 0.0531, 0.4734), # Node group 2A
-                (0.4734, 0.4734, 0.0531),
-                (0.0531, 0.4734, 0.4734),
-                (0.8937, 0.0531, 0.0531), # Node group 2B
-                (0.0531, 0.8937, 0.0531),
-                (0.0531, 0.0531, 0.8937)
-            ]
-            
-            for gp_idx, (l1, l2, l3) in enumerate(gps):
-                gx = l1*p1[0] + l2*p2[0] + l3*p3[0]
-                gy = l1*p1[1] + l2*p2[1] + l3*p3[1]
-                
-                ellipse = self._scene.addEllipse(gx-gp_r, gy-gp_r, gp_r*2, gp_r*2, pen, brush_gp)
+            gp_positions: list[tuple[float, float]] = []
+
+            if element_type == "quad9" or len(el) == 9:
+                if len(el) < 9:
+                    continue
+                from engine.solver.element_quad9 import all_gauss_point_physical_coords
+
+                gp_positions = all_gauss_point_physical_coords(nodes, el)
+            else:
+                continue
+
+            for gp_idx, (gx, gy) in enumerate(gp_positions):
+                ellipse = self._scene.addEllipse(gx - gp_r, gy - gp_r, gp_r * 2, gp_r * 2, pen, brush_gp)
                 ellipse.setZValue(200)
                 ellipse.setData(Qt.UserRole, i)
                 ellipse.setData(Qt.UserRole + 1, "gp")
@@ -985,11 +1066,8 @@ class TerraSimCanvas(QGraphicsView):
         mesh_data : dict
             The MeshResponse from the backend, containing:
             - "nodes":    list of [x, y] coordinate pairs
-            - "elements": list of [n1, ..., n15] (T15 triangles)
-                          where n1-n3 are corner nodes.
-
-        We only draw edges between the 3 corner nodes (n1, n2, n3) since
-        the midside nodes are for quadratic interpolation, not geometry.
+            - "elements": list of node indices (Quad9: 9 nodes, T15: 15 nodes)
+            - "element_type": "quad9" | "t15"
         """
         # Clear any existing mesh items first
         self.clear_mesh()
@@ -1018,6 +1096,8 @@ class TerraSimCanvas(QGraphicsView):
         active_indices = set(current_phase.get("active_polygon_indices", [])) if current_phase else set()
         is_mesh_tab = self._state.active_tab == "MESH"
 
+        element_type = mesh_data.get("element_type", "quad9")
+
         for idx, elem in enumerate(elements):
             # Filtering: In STAGING/RESULT tabs, only show elements belonging to active polygons
             if not is_mesh_tab:
@@ -1025,31 +1105,24 @@ class TerraSimCanvas(QGraphicsView):
                 if poly_id is not None and poly_id not in active_indices:
                     continue
 
-            # T15 element: [0, 1, 2 (corners), 3,4,5 (e12), 6,7,8 (e23), 9,10,11 (e31), 12,13,14 (int)]
-            if len(elem) < 15:
+            if element_type == "quad9" or len(elem) == 9:
+                if len(elem) < 9:
+                    continue
+                perimeter_indices = [0, 4, 1, 5, 2, 6, 3, 7]
+            else:
                 continue
 
-            # Draw complete perimeter sequence including mid-edge nodes
-            # Sequence: 0 -> 3 -> 4 -> 5 -> 1 -> 6 -> 7 -> 8 -> 2 -> 9 -> 10 -> 11 -> 0
-            perimeter_indices = [0, 3, 4, 5, 1, 6, 7, 8, 2, 9, 10, 11]
-            
-            # Start path at first node
             start_node = nodes[elem[perimeter_indices[0]]]
             batch_path.moveTo(start_node[0], start_node[1])
-            
-            # Line to subsequent boundary nodes
             for p_idx in perimeter_indices[1:]:
                 next_node = nodes[elem[p_idx]]
                 batch_path.lineTo(next_node[0], next_node[1])
-            
-            # Close path back to node 0
             batch_path.lineTo(start_node[0], start_node[1])
 
-            # Draw tiny markers for ALL 15 nodes in Mesh View (Compact Style)
-            node_r = 0.008 
+            node_r = 0.008
             for n_idx in elem:
                 nx, ny = nodes[n_idx][0], nodes[n_idx][1]
-                batch_path.addEllipse(nx - node_r, ny - node_r, node_r*2, node_r*2)
+                batch_path.addEllipse(nx - node_r, ny - node_r, node_r * 2, node_r * 2)
 
         # Add the complete path as a single QGraphicsPathItem
         if not batch_path.isEmpty():
@@ -1221,6 +1294,18 @@ class TerraSimCanvas(QGraphicsView):
             scene_pos.setY(round(scene_pos.y() / spacing) * spacing)
 
         active_tab = self._state.active_tab
+
+        # ---- PICK_POLYGON_EDGE (MESH tab) ----
+        if (
+            event.button() == Qt.LeftButton
+            and self._state.tool_mode == "PICK_POLYGON_EDGE"
+            and active_tab == "MESH"
+        ):
+            edge = self._pick_polygon_edge_at(raw_scene_pos)
+            if edge:
+                self._state.set_selected_mesh_edge(edge)
+            event.accept()
+            return
 
         # ---- PICK_POINT Mode Handling ----
         if event.button() == Qt.LeftButton and self._state.tool_mode == "PICK_POINT":

@@ -2,8 +2,22 @@
 import sys
 import time
 import subprocess
+from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+
+def _ensure_rust_core() -> bool:
+    """Install terrasim_core into this venv if missing (required by solver)."""
+    try:
+        import terrasim_core  # noqa: F401
+        return True
+    except ImportError:
+        pass
+    script = Path(__file__).resolve().parent / "scripts" / "ensure_rust_core.py"
+    print("[DEV] terrasim_core tidak ditemukan — mencoba build Rust extension...")
+    r = subprocess.run([sys.executable, str(script)])
+    return r.returncode == 0
 
 class AutoRestartHandler(FileSystemEventHandler):
     def __init__(self, script_to_run):
@@ -15,7 +29,7 @@ class AutoRestartHandler(FileSystemEventHandler):
     def start_app(self):
         # Clear terminal for a fresh log view
         import os
-        os.system('cls' if os.name == 'nt' else 'clear')
+        # os.system('cls' if os.name == 'nt' else 'clear')
 
         # Matikan proses lama jika ada
         if self.process:
@@ -61,6 +75,15 @@ class AutoRestartHandler(FileSystemEventHandler):
                     self.start_app()
 
 if __name__ == "__main__":
+    if not _ensure_rust_core():
+        print(
+            "[DEV] Tidak bisa melanjutkan tanpa terrasim_core.\n"
+            "  cd engine\\rust_core\n"
+            "  ..\\..\\venv\\Scripts\\activate\n"
+            "  maturin develop --release"
+        )
+        raise SystemExit(1)
+
     script_name = "main.py"
     
     # Inisialisasi Watcher
