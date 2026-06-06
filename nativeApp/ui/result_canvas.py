@@ -218,6 +218,11 @@ class ResultCanvas(QGraphicsView):
         if out_type == OutputType.SIGMA_3: return avg + radius
         if out_type == OutputType.SIGMA_1_EFF: return (avg - radius) - p_total
         if out_type == OutputType.SIGMA_3_EFF: return (avg + radius) - p_total
+        if out_type == OutputType.STRAIN_XX: return u_get(s, "eps_xx", 0.0)
+        if out_type == OutputType.STRAIN_YY: return u_get(s, "eps_yy", 0.0)
+        if out_type == OutputType.STRAIN_XY: return u_get(s, "eps_xy", 0.0)
+        if out_type == OutputType.TOTAL_STRAIN: return math.sqrt(u_get(s, "eps_xx", 0.0)**2 + u_get(s, "eps_yy", 0.0)**2)
+        if out_type == OutputType.ELASTIC_MODULUS: return u_get(s, "e_used", 0.0)
         
         return 0.0
 
@@ -277,7 +282,7 @@ class ResultCanvas(QGraphicsView):
         nodal_raw = []
         if is_contour and phase_results:
             ot_str = str(out_type).lower()
-            if "stresses" in phase_results and ("sigma" in ot_str or "pwp" in ot_str):
+            if "stresses" in phase_results and ("sigma" in ot_str or "pwp" in ot_str or "strain" in ot_str or "elastic" in ot_str):
                 stress_gp_map = {} 
                 for s in phase_results["stresses"]:
                     eid = u_get(s, "element_id")
@@ -623,6 +628,8 @@ class ResultCanvas(QGraphicsView):
                 unit = " m"
             elif "sigma" in str(out_type) or "pwp" in str(out_type):
                 unit = " kN/m\u00b2"
+            elif "strain" in str(out_type):
+                unit = ""
             
             # Update gradient bar direction to match contour colormap
             if invert:
@@ -640,8 +647,15 @@ class ResultCanvas(QGraphicsView):
                     border: 1px solid #94a3b8;
                 """)
             
-            self._lbl_min.setText(f"{v_min:.3f}{unit}")
-            self._lbl_max.setText(f"{v_max:.3f}{unit}")
+            def format_val(v):
+                if v == 0:
+                    return "0.000"
+                if abs(v) < 0.01:
+                    return f"{v:.3e}"
+                return f"{v:.3f}"
+            
+            self._lbl_min.setText(f"{format_val(v_min)}{unit}")
+            self._lbl_max.setText(f"{format_val(v_max)}{unit}")
             self._lbl_title.setText(str(out_type).replace("OutputType.", "").replace("_", " ").upper())
 
     def _create_legend_panel(self):

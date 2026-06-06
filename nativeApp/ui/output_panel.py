@@ -69,10 +69,17 @@ class OutputPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 1. Header
-        header = QPushButton("Output View")
-        header.setProperty("class", "PanelHeader")
+        # Header
+        header = QLabel("Output View")
+        header.setStyleSheet(
+            "font-weight: semibold; padding: 4px 6px; color: #888;"
+        )
         layout.addWidget(header)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(sep)
 
         # 2. Controls Area
         controls_container = QWidget()
@@ -99,7 +106,14 @@ class OutputPanel(QWidget):
         self.type_combo.addItem("PWP Steady", OutputType.PWP_STEADY)
         self.type_combo.addItem("PWP Excess", OutputType.PWP_EXCESS)
         self.type_combo.insertSeparator(13)
+        self.type_combo.addItem("Strain xx", OutputType.STRAIN_XX)
+        self.type_combo.addItem("Strain yy", OutputType.STRAIN_YY)
+        self.type_combo.addItem("Strain xy", OutputType.STRAIN_XY)
+        self.type_combo.insertSeparator(17)
+        self.type_combo.addItem("Total Strain", OutputType.TOTAL_STRAIN)
+        self.type_combo.insertSeparator(19)
         self.type_combo.addItem("Yield Status", OutputType.YIELD_STATUS)
+        self.type_combo.addItem("Elastic Modulus", OutputType.ELASTIC_MODULUS)
         
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         controls_layout.addWidget(self.type_combo)

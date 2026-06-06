@@ -107,7 +107,7 @@ class MeshBar(QWidget):
         row2 = QHBoxLayout()
         row2.setSpacing(14)
 
-        row1.addWidget(QLabel("Mesh Size (m)"))
+        row1.addWidget(QLabel("Maximum Element Size (m)"))
         self.spn_size = QDoubleSpinBox()
         self.spn_size.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spn_size.setRange(0.1, 50.0)
@@ -242,8 +242,7 @@ class MeshBar(QWidget):
             return
         self.lbl_nodes.setText(str(len(response.get("nodes", []))))
         n_el = len(response.get("elements", []))
-        et = response.get("element_type", "quad9")
-        self.lbl_elems.setText(f"{n_el} ({et})")
+        self.lbl_elems.setText(f"{n_el}")
 
     def _on_edge_pick_clicked(self):
         if self.btn_edge.isChecked():

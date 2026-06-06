@@ -11,15 +11,12 @@ Reference:
   that handles snap-through." Computers & Structures, 13, 55-62.
 """
 import numpy as np
-# new solver
 from scipy.sparse.linalg import spsolve as scipy_spsolve
 
 try:
     from pypardiso import spsolve as pardiso_spsolve
 except ImportError:
     pardiso_spsolve = scipy_spsolve
-# old solver
-# from scipy.sparse.linalg import spsolve
 
 
 def compute_initial_arc_length(step_size, delta_F_external_free, K_free):

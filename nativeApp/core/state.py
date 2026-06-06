@@ -15,6 +15,7 @@
 # ===========================================================================
 
 from __future__ import annotations
+import copy
 from typing import Optional
 from enum import Enum
 from PySide6.QtCore import QObject, Signal
@@ -43,8 +44,12 @@ class OutputType(str, Enum):
     PWP_STEADY = "pwp_steady"
     PWP_EXCESS = "pwp_excess"
     PWP_TOTAL = "pwp_total"
-    STRAIN_1 = "strain_1"
-    STRAIN_3 = "strain_3"
+    STRAIN_XX = "strain_xx"
+    STRAIN_YY = "strain_yy"
+    STRAIN_XY = "strain_xy"
+    TOTAL_STRAIN = "total_strain"
+    ELASTIC_MODULUS = "elastic_modulus"
+    
 
 class ProjectState(QObject):
     """
@@ -847,6 +852,16 @@ class ProjectState(QObject):
                 "reset_displacements": False,
                 "kh": 0.0,
                 "kv": 0.0,
+                "max_iterations": 60,
+                "min_desired_iterations": 3,
+                "max_desired_iterations": 15,
+                "initial_step_size": 0.05,
+                "tolerance": 0.001, 
+                "max_load_fraction": 0.5,
+                "unloading_max_retries": 5,
+                "max_steps": 100,
+                "max_displacement_limit": 10.0,
+                "is_calculated": False,
                 "current_material": {str(i): p.get("materialId", "") for i, p in enumerate(self._polygons)},
                 "parent_material": {},
                 "load_overrides": {}
@@ -933,19 +948,21 @@ class ProjectState(QObject):
     def update_phase(self, index: int, data: dict):
         if 0 <= index < len(self._phases):
             phase = self._phases[index]
-            
-            # Check for Safety Phase restriction
-            if phase.get("phase_type") == "SAFETY_ANALYSIS":
-                # We block model data changes (active elements, materials, etc.) 
-                # but only if they differ from current values.
-                restricted_keys = [
-                    "active_polygon_indices", "active_load_ids", "active_water_level_id", 
-                    "current_material", "reset_displacements", "kh", "kv"
-                ]
-                for k in restricted_keys:
-                    if k in data and data[k] != phase.get(k):
-                        self.log(f"Cannot modify model structure of '{phase.get('name')}'. Safety Analysis must follow its parent.")
-                        return
+            new_type = data.get("phase_type", phase.get("phase_type"))
+            staying_safety = (
+                phase.get("phase_type") == "SAFETY_ANALYSIS"
+                and new_type == "SAFETY_ANALYSIS"
+            )
+
+            # Safety phases inherit model structure from parent; allow name, type
+            # conversion, parent, and per-phase solver settings.
+            if staying_safety:
+                restricted_keys = {
+                    "active_polygon_indices", "active_load_ids", "active_water_level_id",
+                    "current_material", "reset_displacements", "kh", "kv",
+                    "active_beam_ids", "load_overrides", "parent_material",
+                }
+                data = {k: v for k, v in data.items() if k not in restricted_keys}
 
             old_parent_id = phase.get("parent_id")
             new_parent_id = data.get("parent_id", old_parent_id) if "parent_id" in data else old_parent_id
@@ -1034,14 +1051,18 @@ class ProjectState(QObject):
             old_child_current_mat = dict(child.get("current_material", {}))
             
             if child.get("phase_type") == "SAFETY_ANALYSIS":
-                # SAFETY analysis stages inherit EVERYTHING immutable
+                # SAFETY analysis stages inherit EVERYTHING immutable from parent
                 child["active_polygon_indices"] = list(parent.get("active_polygon_indices", []))
                 child["active_load_ids"] = list(parent.get("active_load_ids", []))
                 child["active_water_level_id"] = parent.get("active_water_level_id")
                 child["active_beam_ids"] = list(parent.get("active_beam_ids", []))
                 child["current_material"] = dict(parent.get("current_material", {}))
                 child["parent_material"] = dict(parent.get("current_material", {}))
-                child["load_overrides"] = copy.deepcopy(parent.get("load_overrides", {}))
+                child["load_overrides"] = dict(parent.get("load_overrides", {}))
+                child["reset_displacements"] = parent.get("reset_displacements", False)
+                # Mirror parent pseudo-static coeffs (SRM solver does not re-apply PS increment)
+                child["kh"] = parent.get("kh", 0.0)
+                child["kv"] = parent.get("kv", 0.0)
             else:
                 # Normal PLASTIC stages inherit material changes to previously inherited items
                 # 1. Update child's parent_material snapshot
@@ -1456,7 +1477,17 @@ class ProjectState(QObject):
                 "active_water_level_id": ph.get("active_water_level_id"),
                 "active_beam_ids": ph.get("active_beam_ids", []),
                 "kh": ph.get("kh", 0.0),
-                "kv": ph.get("kv", 0.0)
+                "kv": ph.get("kv", 0.0),
+                "max_iterations": ph.get("max_iterations", 60),
+                "min_desired_iterations": ph.get("min_desired_iterations", 3),
+                "max_desired_iterations": ph.get("max_desired_iterations", 15),
+                "initial_step_size": ph.get("initial_step_size", 0.05),
+                "tolerance": ph.get("tolerance", 0.01),
+                "max_load_fraction": ph.get("max_load_fraction", 0.5),
+                "unloading_max_retries": ph.get("unloading_max_retries", 5),
+                "max_steps": ph.get("max_steps", 100),
+                "max_displacement_limit": ph.get("max_displacement_limit", 10.0),
+                "is_calculated": ph.get("is_calculated",False)
             })
 
         # 3. Materials Library

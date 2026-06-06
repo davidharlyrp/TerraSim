@@ -67,9 +67,6 @@ def return_mapping_hoek_brown(
     s_avg_trial = (sig_xx_trial + sig_yy_trial) / 2.0
     radius_trial = np.sqrt(((sig_xx_trial - sig_yy_trial) / 2.0)**2 + sig_xy_trial**2)
     
-    # Solve 2R - sigma_ci * (m_b * (-s_avg - R) / sigma_ci + s)^a = 0 for R
-    # Let g(R) = 2R - sigma_ci * (term)^a
-    # term = (m_b * (-s_avg - R) / sigma_ci + s)
     
     R = radius_trial
     converged = False

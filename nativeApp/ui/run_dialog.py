@@ -230,23 +230,23 @@ class SolveRunDialog(QDialog):
         self.log_output.setReadOnly(True)
         self.log_output.setStyleSheet("""
             QPlainTextEdit {
-                background-color: #0f172a;
+                background-color: #ffffff;
                 color: #94a3b8;
                 font-family: 'DM Mono', 'Consolas', monospace;
                 font-size: 11px;
                 line-height: 1.4;
-                border: none;
+                border: 1px;
                 border-radius: 8px;
                 padding: 10px;
             }
             QScrollBar:vertical {
                 border: none;
-                background: #0f172a;
+                background: #ffffff;
                 width: 8px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background: #334155;
+                background: #94a3b8;
                 min-height: 20px;
                 border-radius: 4px;
             }

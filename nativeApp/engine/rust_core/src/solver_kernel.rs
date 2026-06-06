@@ -13,6 +13,7 @@ const NUM_NODES: usize = quad9::NUM_NODES;
 const NUM_DOFS: usize = quad9::NUM_DOFS;
 use crate::material_models::hoek_brown;
 use crate::material_models::mohr_coulomb;
+use crate::material_models::hardening_soil;
 
 /// Full stress computation loop exposed to Python via PyO3.
 /// Quad9 element topology.
@@ -22,6 +23,7 @@ pub fn compute_stresses_loop_py<'py>(
     py: Python<'py>,
     element_nodes: PyReadonlyArray2<'py, i64>,      // (N, 9)
     total_u: PyReadonlyArray1<'py, f64>,             // (num_dof,)
+    elem_u_ref: PyReadonlyArray2<'py, f64>,          // (N, 18)
     step_start_stress: PyReadonlyArray3<'py, f64>,   // (N, 9, 3)
     step_start_strain: PyReadonlyArray3<'py, f64>,   // (N, 9, 3)
     step_start_pwp: PyReadonlyArray2<'py, f64>,      // (N, 9)
@@ -41,6 +43,12 @@ pub fn compute_stresses_loop_py<'py>(
     mat_mb: PyReadonlyArray1<'py, f64>,              // (N,)
     mat_s: PyReadonlyArray1<'py, f64>,               // (N,)
     mat_a: PyReadonlyArray1<'py, f64>,               // (N,)
+    mat_e50_ref: PyReadonlyArray1<'py, f64>,
+    mat_e_oed_ref: PyReadonlyArray1<'py, f64>,
+    mat_e_ur_ref: PyReadonlyArray1<'py, f64>,
+    mat_m_power: PyReadonlyArray1<'py, f64>,
+    mat_p_ref: PyReadonlyArray1<'py, f64>,
+    step_start_state_vars: PyReadonlyArray3<'py, f64>, // (N, 9, 2)
     penalties: PyReadonlyArray1<'py, f64>,            // (N,)
     is_srm: bool,
     is_gravity_phase: bool,
@@ -52,9 +60,11 @@ pub fn compute_stresses_loop_py<'py>(
     Bound<'py, PyArray2<bool>>,
     Bound<'py, PyArray3<f64>>,
     Bound<'py, PyArray2<f64>>,
+    Bound<'py, PyArray3<f64>>,
 )> {
     let elem_nodes = element_nodes.as_array();
     let u = total_u.as_array();
+    let u_ref = elem_u_ref.as_array();
     let start_stress = step_start_stress.as_array();
     let start_strain = step_start_strain.as_array();
     let start_pwp = step_start_pwp.as_array();
@@ -76,6 +86,13 @@ pub fn compute_stresses_loop_py<'py>(
     let a_arr = mat_a.as_array();
     let pen_arr = penalties.as_array();
 
+    let e50_arr = mat_e50_ref.as_array();
+    let eoed_arr = mat_e_oed_ref.as_array();
+    let eur_arr = mat_e_ur_ref.as_array();
+    let m_pow_arr = mat_m_power.as_array();
+    let pref_arr = mat_p_ref.as_array();
+    let start_state_vars = step_start_state_vars.as_array();
+
     let num_active = elem_nodes.shape()[0];
 
     let mut f_int = Array1::<f64>::zeros(num_dof);
@@ -83,13 +100,14 @@ pub fn compute_stresses_loop_py<'py>(
     let mut new_yield = Array2::<bool>::default((num_active, NUM_GP));
     let mut new_strain = Array3::<f64>::zeros((num_active, NUM_GP, 3));
     let mut new_pwp_excess = Array2::<f64>::zeros((num_active, NUM_GP));
+    let mut new_state_vars = Array3::<f64>::zeros((num_active, NUM_GP, 2));
 
     for i in 0..num_active {
         let mut u_el = [0.0f64; NUM_DOFS];
         for li in 0..NUM_NODES {
             let n_idx = elem_nodes[[i, li]] as usize;
-            u_el[li * 2] = u[n_idx * 3];
-            u_el[li * 2 + 1] = u[n_idx * 3 + 1];
+            u_el[li * 2] = u[n_idx * 3] - u_ref[[i, li * 2]];
+            u_el[li * 2 + 1] = u[n_idx * 3 + 1] - u_ref[[i, li * 2 + 1]];
         }
 
         let mut f_int_el = [0.0f64; NUM_DOFS];
@@ -165,6 +183,27 @@ pub fn compute_stresses_loop_py<'py>(
                         mohr_coulomb::return_mapping_mohr_coulomb(trial[0], trial[1], trial[2], su_eff, 0.0);
                     sig_new = [sx, sy, sxy];
                     yld = y;
+                } else if mmodel == 3 {
+                    // Hardening Soil
+                    let (mut c_eff, mut phi_eff) = (c_val, phi_val);
+                    if is_srm {
+                        c_eff /= target_m_stage;
+                        if phi_eff > 0.0 {
+                            phi_eff = (phi_eff.to_radians().tan() / target_m_stage)
+                                .atan()
+                                .to_degrees();
+                        }
+                    }
+                    let (sx, sy, sxy, gp_new, pc_new, y) = hardening_soil::return_mapping_hardening_soil(
+                        trial[0], trial[1], trial[2],
+                        start_state_vars[[i, gp_idx, 0]], start_state_vars[[i, gp_idx, 1]],
+                        c_eff, phi_eff,
+                        e50_arr[i], eoed_arr[i], eur_arr[i], m_pow_arr[i], pref_arr[i]
+                    );
+                    sig_new = [sx, sy, sxy];
+                    yld = y;
+                    new_state_vars[[i, gp_idx, 0]] = gp_new;
+                    new_state_vars[[i, gp_idx, 1]] = pc_new;
                 } else {
                     sig_new = trial;
                     yld = false;
@@ -217,9 +256,36 @@ pub fn compute_stresses_loop_py<'py>(
                     );
                     sig_new = [sx + p_total, sy + p_total, sxy];
                     yld = y;
+                } else if mmodel == 3 {
+                    // Hardening Soil
+                    let (mut c_eff, mut phi_eff) = (c_val, phi_val);
+                    if dtype == 2 {
+                        c_eff = su_val;
+                        phi_eff = 0.0;
+                    }
+                    if is_srm {
+                        c_eff /= target_m_stage;
+                        if phi_eff > 0.0 {
+                            phi_eff = (phi_eff.to_radians().tan() / target_m_stage)
+                                .atan()
+                                .to_degrees();
+                        }
+                    }
+                    let (sx, sy, sxy, gp_new, pc_new, y) = hardening_soil::return_mapping_hardening_soil(
+                        eff_trial[0], eff_trial[1], eff_trial[2],
+                        start_state_vars[[i, gp_idx, 0]], start_state_vars[[i, gp_idx, 1]],
+                        c_eff, phi_eff,
+                        e50_arr[i], eoed_arr[i], eur_arr[i], m_pow_arr[i], pref_arr[i]
+                    );
+                    sig_new = [sx + p_total, sy + p_total, sxy];
+                    yld = y;
+                    new_state_vars[[i, gp_idx, 0]] = gp_new;
+                    new_state_vars[[i, gp_idx, 1]] = pc_new;
                 } else {
                     sig_new = trial_total;
                     yld = false;
+                    new_state_vars[[i, gp_idx, 0]] = start_state_vars[[i, gp_idx, 0]];
+                    new_state_vars[[i, gp_idx, 1]] = start_state_vars[[i, gp_idx, 1]];
                 }
             } else {
                 // DRAINED or NON_POROUS
@@ -282,9 +348,32 @@ pub fn compute_stresses_loop_py<'py>(
                     );
                     sig_new = [sx + p_static, sy + p_static, sxy];
                     yld = y;
+                } else if mmodel == 3 && !skip_yield {
+                    // Hardening Soil
+                    let (mut c_eff, mut phi_eff) = (c_val, phi_val);
+                    if is_srm {
+                        c_eff /= target_m_stage;
+                        if phi_eff > 0.0 {
+                            phi_eff = (phi_eff.to_radians().tan() / target_m_stage)
+                                .atan()
+                                .to_degrees();
+                        }
+                    }
+                    let (sx, sy, sxy, gp_new, pc_new, y) = hardening_soil::return_mapping_hardening_soil(
+                        eff_trial[0], eff_trial[1], eff_trial[2],
+                        start_state_vars[[i, gp_idx, 0]], start_state_vars[[i, gp_idx, 1]],
+                        c_eff, phi_eff,
+                        e50_arr[i], eoed_arr[i], eur_arr[i], m_pow_arr[i], pref_arr[i]
+                    );
+                    sig_new = [sx + p_static, sy + p_static, sxy];
+                    yld = y;
+                    new_state_vars[[i, gp_idx, 0]] = gp_new;
+                    new_state_vars[[i, gp_idx, 1]] = pc_new;
                 } else {
                     sig_new = [eff_trial[0] + p_static, eff_trial[1] + p_static, eff_trial[2]];
                     yld = false;
+                    new_state_vars[[i, gp_idx, 0]] = start_state_vars[[i, gp_idx, 0]];
+                    new_state_vars[[i, gp_idx, 1]] = start_state_vars[[i, gp_idx, 1]];
                 }
                 p_exc_new = 0.0;
             }
@@ -319,6 +408,7 @@ pub fn compute_stresses_loop_py<'py>(
         PyArray2::from_owned_array(py, new_yield),
         PyArray3::from_owned_array(py, new_strain),
         PyArray2::from_owned_array(py, new_pwp_excess),
+        PyArray3::from_owned_array(py, new_state_vars),
     ))
 }
 

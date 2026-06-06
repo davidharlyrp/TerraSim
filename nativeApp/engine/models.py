@@ -21,6 +21,7 @@ class MaterialModel(str, Enum):
     # """Material constitutive model types"""
     LINEAR_ELASTIC = "linear_elastic"
     MOHR_COULOMB = "mohr_coulomb"
+    HARDENING_SOIL = "hardening_soil"
     HOEK_BROWN = "hoek_brown"
     # Future: HARDENING_SOIL, CAM_CLAY, etc.
 
@@ -51,6 +52,12 @@ class Material(BaseModel):
     cohesion: Optional[float] = None
     frictionAngle: Optional[float] = None
     undrainedShearStrength: Optional[float] = None
+    # Hardening Soil parameters
+    youngsModulus50_ref: Optional[float] = None
+    youngsModulusOed_ref: Optional [float] = None
+    youngsModulusUr_ref: Optional [float] = None
+    m_power: Optional[float] = None
+    p_ref: Optional[float] = None
     # Hoek-Brown parameters
     sigma_ci: Optional[float] = None
     gsi: Optional[float] = None
@@ -167,8 +174,6 @@ class EmbeddedBeamAssignment(BaseModel):
     beam_id: str
     nodes: List[int] # Ordered list of node IDs (1-based) defining the beam chain
 
-
-
 class MeshResponse(BaseModel):
     success: bool
     nodes: List[List[float]] # [[x, y], ...]
@@ -184,22 +189,23 @@ class MeshResponse(BaseModel):
 # --- Solver Models ---
 
 class SolverSettings(BaseModel):
-    max_iterations: Optional[int] = 60
-    min_desired_iterations: Optional[int] = 3
-    max_desired_iterations: Optional[int] = 15
-    initial_step_size: Optional[float] = 0.05
-    tolerance: Optional[float] = 0.01
-    max_load_fraction: Optional[float] = 0.5
-    unloading_max_retries: Optional[int] = 5
+    # max_iterations: Optional[int] = 60
+    # min_desired_iterations: Optional[int] = 3
+    # max_desired_iterations: Optional[int] = 15
+    # initial_step_size: Optional[float] = 0.05
+    # tolerance: Optional[float] = 0.01
+    # max_load_fraction: Optional[float] = 0.5
+    # unloading_max_retries: Optional[int] = 5
     realtime_logging: Optional[bool] = True
-    max_steps: Optional[int] = 100  # Maximum MStage steps allowed
-    max_displacement_limit: Optional[float] = 10.0 # Define "collapse" if disp > 10m
+    # max_steps: Optional[int] = 100  # Maximum MStage steps allowed
+    # max_displacement_limit: Optional[float] = 10.0 # Define "collapse" if disp > 10m
     use_arc_length: Optional[bool] = False # Use Crisfield arc-length method instead of Newton-Raphson
     use_pardiso: Optional[bool] = True    # Use multi-threaded Pardiso solver if available
     bc_x_min: Optional[str] = "roller_x"  # Options: "free", "fixed", "roller_x", "roller_y"
     bc_x_max: Optional[str] = "roller_x"
     bc_y_min: Optional[str] = "fixed"
     bc_y_max: Optional[str] = "free"
+    k_w: Optional[float] = 2.2e6 # Bulk modulus of water (kN/m²)
 
 class PointLoadData(BaseModel):
     node: int  # 0-based node index
@@ -221,6 +227,16 @@ class PhaseRequest(BaseModel):
     active_beam_ids: Optional[List[str]] = [] # IDs of active beams
     kh: float = 0.0 # Pseudo-static horizontal coefficient
     kv: float = 0.0 # Pseudo-static vertical coefficient
+    max_iterations: Optional[int] = 60
+    min_desired_iterations: Optional[int] = 3
+    max_desired_iterations: Optional[int] = 15
+    initial_step_size: Optional[float] = 0.05
+    tolerance: Optional[float] = 0.01
+    max_load_fraction: Optional[float] = 0.5
+    unloading_max_retries: Optional[int] = 5
+    max_steps: Optional[int] = 100  # Maximum MStage steps allowed
+    max_displacement_limit: Optional[float] = 10.0 # Define "collapse" if disp > 10m
+    is_calculated: bool
 
 class TrackPoint(BaseModel):
     id: str  # e.g., "node_14" or "gp_10_0" (element 10, gp 0)
@@ -265,6 +281,7 @@ class StressResult(BaseModel):
     eps_yy: Optional[float] = 0.0
     eps_xy: Optional[float] = 0.0
     eps_zz: Optional[float] = 0.0
+    e_used: Optional[float] = None  # NEW: Elastic modulus used in calculation
 
 class BeamResult(BaseModel):
     beam_id: str
@@ -296,6 +313,7 @@ class PhaseResult(BaseModel):
     step_failed_at: Optional[int] = None
     error: Optional[str] = None
     track_data: Optional[dict] = {} # Dict mapping track_point_id to list of step data dicts
+    is_calculated: bool
 
 class SolverResponse(BaseModel):
     success: bool

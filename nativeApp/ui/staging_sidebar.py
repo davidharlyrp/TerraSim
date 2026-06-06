@@ -256,10 +256,17 @@ class StagingSidebar(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Phases Header
-        btn_phases = QPushButton("Phases")
-        btn_phases.setProperty("class", "SectionHeader")
-        layout.addWidget(btn_phases)
+        # Header
+        header = QLabel("Phases")
+        header.setStyleSheet(
+            "font-weight: semibold; padding: 4px 6px; color: #888;"
+        )
+        layout.addWidget(header)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(sep)
 
         # Add Button (Now at the top)
         self.add_btn = QPushButton("+ Add Analysis Stage")
@@ -402,6 +409,13 @@ class StagingSidebar(QWidget):
             "reset_displacements": False,
             "kh": current.get("kh", 0.0) if current else 0.0,
             "kv": current.get("kv", 0.0) if current else 0.0,
+            "max_iterations": current.get("max_iterations", 60) if current else 60,
+            "min_desired_iterations": current.get("min_desired_iterations", 3) if current else 3,
+            "max_desired_iterations": current.get("max_desired_iterations", 15) if current else 15,
+            "initial_step_size": current.get("initial_step_size", 0.05) if current else 0.05,
+            "tolerance": current.get("tolerance", 0.001) if current else 0.001,
+            "max_steps": current.get("max_steps", 100) if current else 100,
+            "max_displacement_limit": current.get("max_displacement_limit", 10.0) if current else 10.0,
             "current_material": dict(current["current_material"]) if current else {},
             "parent_material": dict(current["current_material"]) if current else {},
             "load_overrides": copy.deepcopy(current.get("load_overrides", {})) if current else {}

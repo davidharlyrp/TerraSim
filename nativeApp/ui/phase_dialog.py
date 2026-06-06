@@ -160,19 +160,103 @@ class PhaseDialog(QDialog):
         
         ps_layout.addLayout(coeff_row)
         layout.addWidget(self.pseudo_group)
+
+        # Solver Group Settings
+        self.solver_group = QWidget()
+        solver_layout = QVBoxLayout(self.solver_group)
+        solver_layout.setContentsMargins(0, 5, 0, 5)
+        solver_layout.setSpacing(8)
+
+        solver_lbl = QLabel("Solver Settings")
+        solver_lbl.setProperty("class", "ItemLabel")
+        solver_layout.addWidget(solver_lbl)
+
+        solver_row = QHBoxLayout()
+
+        # max_iterations
+        max_iterations_layout = QVBoxLayout()
+        max_iterations_lbl = QLabel("Max Iterations")
+        max_iterations_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.max_iterations_edit = QLineEdit()
+        self.max_iterations_edit.setPlaceholderText("60")
+        self.max_iterations_edit.setValidator(QDoubleValidator(1, 1000, 0))
+        max_iterations_layout.addWidget(max_iterations_lbl)
+        max_iterations_layout.addWidget(self.max_iterations_edit)
+        solver_row.addLayout(max_iterations_layout)
+
+        # min_desired_iterations
+        min_desired_iterations_layout = QVBoxLayout()
+        min_desired_iterations_lbl = QLabel("Min Desired Iterations")
+        min_desired_iterations_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.min_desired_iterations_edit = QLineEdit()
+        self.min_desired_iterations_edit.setPlaceholderText("3")
+        self.min_desired_iterations_edit.setValidator(QDoubleValidator(1, 1000, 0))
+        min_desired_iterations_layout.addWidget(min_desired_iterations_lbl)
+        min_desired_iterations_layout.addWidget(self.min_desired_iterations_edit)
+        solver_row.addLayout(min_desired_iterations_layout)
+
+        # max_desired_iterations
+        max_desired_iterations_layout = QVBoxLayout()
+        max_desired_iterations_lbl = QLabel("Max Desired Iterations")
+        max_desired_iterations_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.max_desired_iterations_edit = QLineEdit()
+        self.max_desired_iterations_edit.setPlaceholderText("15")
+        self.max_desired_iterations_edit.setValidator(QDoubleValidator(1, 1000, 0))
+        max_desired_iterations_layout.addWidget(max_desired_iterations_lbl)
+        max_desired_iterations_layout.addWidget(self.max_desired_iterations_edit)
+        solver_row.addLayout(max_desired_iterations_layout)
+
+        # initial_step_size
+        initial_step_size_layout = QVBoxLayout()
+        initial_step_size_lbl = QLabel("Initial Step Size")
+        initial_step_size_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.initial_step_size_edit = QLineEdit()
+        self.initial_step_size_edit.setPlaceholderText("0.05")
+        self.initial_step_size_edit.setValidator(QDoubleValidator(0.001, 1.0, 3))
+        initial_step_size_layout.addWidget(initial_step_size_lbl)
+        initial_step_size_layout.addWidget(self.initial_step_size_edit)
+        solver_row.addLayout(initial_step_size_layout)
+
+        # tolerance
+        tolerance_layout = QVBoxLayout()
+        tolerance_lbl = QLabel("Error Tolerance")
+        tolerance_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.tolerance_edit = QLineEdit()
+        self.tolerance_edit.setPlaceholderText("0.01")
+        self.tolerance_edit.setValidator(QDoubleValidator(0.0001, 0.1, 4))
+        tolerance_layout.addWidget(tolerance_lbl)
+        tolerance_layout.addWidget(self.tolerance_edit)
+        solver_row.addLayout(tolerance_layout)
+
+        # max_step
+        max_step_layout = QVBoxLayout()
+        max_step_lbl = QLabel("Max Total Steps")
+        max_step_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.max_step_edit = QLineEdit()
+        self.max_step_edit.setPlaceholderText("100")
+        self.max_step_edit.setValidator(QDoubleValidator(1, 1000, 0))
+        max_step_layout.addWidget(max_step_lbl)
+        max_step_layout.addWidget(self.max_step_edit)
+        solver_row.addLayout(max_step_layout)
+
+        # max_displacement_limit
+        max_displacement_limit_layout = QVBoxLayout()
+        max_displacement_limit_lbl = QLabel("Max Displacement Limit")
+        max_displacement_limit_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
+        self.max_displacement_limit_edit = QLineEdit()
+        self.max_displacement_limit_edit.setPlaceholderText("10.0")
+        self.max_displacement_limit_edit.setValidator(QDoubleValidator(0.001, 100.0, 2))
+        max_displacement_limit_layout.addWidget(max_displacement_limit_lbl)
+        max_displacement_limit_layout.addWidget(self.max_displacement_limit_edit)
+        solver_row.addLayout(max_displacement_limit_layout)
+
+        solver_layout.addLayout(solver_row)
+        layout.addWidget(self.solver_group)
+
         
         # Connect type change for visibility
         self.type_cmb.currentIndexChanged.connect(self._update_visibility)
 
-        # Disabling inputs if SAFETY_ANALYSIS
-        if self._phase.get("phase_type") == "SAFETY_ANALYSIS":
-            self.wl_cmb.setEnabled(False)
-            self.reset_cb.setEnabled(False)
-            self.kh_edit.setEnabled(False)
-            self.kv_edit.setEnabled(False)
-            # parent_cmb is left enabled because changing parent is a valid structural change, 
-            # but it will re-sync in _on_save.
-        
         self._update_visibility()
 
         layout.addStretch()
@@ -213,47 +297,70 @@ class PhaseDialog(QDialog):
             
         self.kh_edit.setText(str(ph.get("kh", "0.0")))
         self.kv_edit.setText(str(ph.get("kv", "0.0")))
+        self.max_iterations_edit.setText(str(ph.get("max_iterations", "60")))
+        self.min_desired_iterations_edit.setText(str(ph.get("min_desired_iterations", "3")))
+        self.max_desired_iterations_edit.setText(str(ph.get("max_desired_iterations", "15")))
+        self.initial_step_size_edit.setText(str(ph.get("initial_step_size", "0.05")))
+        self.tolerance_edit.setText(str(ph.get("tolerance", "0.001")))
+        self.max_step_edit.setText(str(ph.get("max_steps", "100")))
+        self.max_displacement_limit_edit.setText(str(ph.get("max_displacement_limit", "10.0")))
 
     def _update_visibility(self):
         ptype = self.type_cmb.currentData()
         # pseudo-static is only relevant for plastic or gravity loading
         can_ps = ptype in ["PLASTIC", "GRAVITY_LOADING"]
+        is_safety = ptype == "SAFETY_ANALYSIS"
         self.pseudo_group.setVisible(can_ps)
+        self.wl_cmb.setEnabled(not is_safety)
+        if self._phase_index > 0:
+            self.reset_cb.setEnabled(not is_safety)
+        self.kh_edit.setEnabled(not is_safety)
+        self.kv_edit.setEnabled(not is_safety)
+
+    def _parse_int(self, edit, default: int) -> int:
+        text = edit.text().strip()
+        return int(text) if text else default
+
+    def _parse_float(self, edit, default: float) -> float:
+        text = edit.text().strip()
+        return float(text) if text else default
 
     def _on_save(self):
-        # Update phase dictionary
-        self._phase["name"] = self.name_edit.text()
+        ph = self._phase
         ptype = self.type_cmb.currentData()
-        self._phase["phase_type"] = ptype
-        self._phase["active_water_level_id"] = self.wl_cmb.currentData()
-        
         can_ps = ptype in ["PLASTIC", "GRAVITY_LOADING"]
+
+        updates = {
+            "name": self.name_edit.text(),
+            "phase_type": ptype,
+            "max_iterations": self._parse_int(self.max_iterations_edit, ph.get("max_iterations", 60)),
+            "min_desired_iterations": self._parse_int(self.min_desired_iterations_edit, ph.get("min_desired_iterations", 3)),
+            "max_desired_iterations": self._parse_int(self.max_desired_iterations_edit, ph.get("max_desired_iterations", 15)),
+            "initial_step_size": self._parse_float(self.initial_step_size_edit, ph.get("initial_step_size", 0.05)),
+            "tolerance": self._parse_float(self.tolerance_edit, ph.get("tolerance", 0.001)),
+            "max_steps": self._parse_int(self.max_step_edit, ph.get("max_steps", 100)),
+            "max_displacement_limit": self._parse_float(self.max_displacement_limit_edit, ph.get("max_displacement_limit", 10.0)),
+        }
 
         if can_ps:
             try:
-                self._phase["kh"] = float(self.kh_edit.text() or 0.0)
-                self._phase["kv"] = float(self.kv_edit.text() or 0.0)
+                updates["kh"] = float(self.kh_edit.text() or 0.0)
+                updates["kv"] = float(self.kv_edit.text() or 0.0)
             except ValueError:
-                self._phase["kh"] = 0.0
-                self._phase["kv"] = 0.0
-        else:
-            # Explicitly reset for other types (SRM, K0)
-            self._phase["kh"] = 0.0
-            self._phase["kv"] = 0.0
-        
-        if self._phase_index > 0:
-            self._phase["parent_id"] = self.parent_cmb.currentData()
-            self._phase["reset_displacements"] = self.reset_cb.isChecked()
-            
-            # Safety Analysis state propagation logic
-            if self._phase["phase_type"] == "SAFETY_ANALYSIS" and self._phase["parent_id"]:
-                 parent = next((p for p in self._state.phases if p["id"] == self._phase["parent_id"]), None)
-                 if parent:
-                      self._phase["active_polygon_indices"] = list(parent.get("active_polygon_indices", []))
-                      self._phase["active_load_ids"] = list(parent.get("active_load_ids", []))
-                      self._phase["active_water_level_id"] = parent.get("active_water_level_id")
-                      self._phase["active_beam_ids"] = list(parent.get("active_beam_ids", []))
-                      self._phase["current_material"] = dict(parent.get("current_material", {}))
+                updates["kh"] = 0.0
+                updates["kv"] = 0.0
+        elif ptype == "K0_PROCEDURE":
+            updates["kh"] = 0.0
+            updates["kv"] = 0.0
+        # SAFETY_ANALYSIS: kh/kv and model structure synced from parent via propagate_phase_changes
 
-        self._state.update_phase(self._phase_index, self._phase)
+        if ptype != "SAFETY_ANALYSIS":
+            updates["active_water_level_id"] = self.wl_cmb.currentData()
+
+        if self._phase_index > 0:
+            updates["parent_id"] = self.parent_cmb.currentData()
+            if ptype != "SAFETY_ANALYSIS":
+                updates["reset_displacements"] = self.reset_cb.isChecked()
+
+        self._state.update_phase(self._phase_index, updates)
         self.accept()

@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from engine.models import DrainageType, Material
+from engine.models import DrainageType, Material, MaterialModel
 
 NUM_NODES = 9
 NUM_DOFS = 18
@@ -145,10 +145,14 @@ def compute_element_matrices_quad9(
     kv: float = 0.0,
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict], np.ndarray]:
     """Stiffness (18×18), gravity (18), Gauss point data, elastic D (3×3)."""
-    if material.drainage_type in [DrainageType.UNDRAINED_C, DrainageType.NON_POROUS]:
-        e_mod = material.youngsModulus
-    else:
-        e_mod = material.effyoungsModulus or 10000.0
+    if material.material_model in [MaterialModel.LINEAR_ELASTIC,MaterialModel.MOHR_COULOMB,MaterialModel.HOEK_BROWN]:
+        if material.drainage_type in [DrainageType.UNDRAINED_C, DrainageType.NON_POROUS]:
+            e_mod = material.youngsModulus
+        else:
+            e_mod = material.effyoungsModulus or 10000.0
+    elif material.material_model == MaterialModel.HARDENING_SOIL: #For Hardening Soil
+        e_mod = material.youngsModulus50_ref
+
     nu = material.poissonsRatio
     factor = e_mod / ((1 + nu) * (1 - 2 * nu))
     d_mat = (

@@ -48,42 +48,10 @@ class PreferencesDialog(QDialog):
                 border-radius: 0px; 
                 background-color: #ffffff;
                 color: #111827;
-                height: 24px;
+                height: 20px;
             }
             QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #111827; }
         """)
-
-        # --- Numerical Control group ---
-        num_group = QGroupBox("Numerical Control")
-        num_layout = QVBoxLayout(num_group)
-        num_layout.setSpacing(6)
-
-        # Tolerance
-        self.spn_tol = self._add_row(num_layout, "Convergence Tolerance:", QDoubleSpinBox())
-        self.spn_tol.setRange(0.0001, 1.0)
-        self.spn_tol.setDecimals(4)
-        self.spn_tol.setSingleStep(0.001)
-
-        # Max Iterations
-        self.spn_iter = self._add_row(num_layout, "Max Iterations:", QSpinBox())
-        self.spn_iter.setRange(1, 500)
-
-        # Initial Step Size
-        self.spn_step = self._add_row(num_layout, "Initial Step Size (fraction):", QDoubleSpinBox())
-        self.spn_step.setRange(0.001, 1.0)
-        self.spn_step.setDecimals(3)
-        self.spn_step.setSingleStep(0.01)
-
-        # Max Steps
-        self.spn_max_steps = self._add_row(num_layout, "Max Total Steps:", QSpinBox())
-        self.spn_max_steps.setRange(1, 1000)
-
-        # Disp Limit
-        self.spn_disp_limit = self._add_row(num_layout, "Max Displacement Limit (m):", QDoubleSpinBox())
-        self.spn_disp_limit.setRange(0.1, 1000.0)
-        self.spn_disp_limit.setDecimals(1)
-
-        root_layout.addWidget(num_group)
 
         # --- Calculation Methods group ---
         meth_group = QGroupBox("Calculation Methods")
@@ -105,6 +73,17 @@ class PreferencesDialog(QDialog):
         meth_layout.addWidget(self.chk_pardiso)
 
         root_layout.addWidget(meth_group)
+
+        # --- General Parameter group ---
+        gp_group = QGroupBox("General Parameters")
+        gp_layout = QVBoxLayout(gp_group)
+        gp_layout.setSpacing(6)
+
+        self.spn_kw = self._add_row(gp_layout, "Bulk Modulus of Water, Kw (kPa):", QDoubleSpinBox())
+        self.spn_kw.setRange(0, 1e12)
+        self.spn_kw.setToolTip("Bulk modulus of water (kN/m^2)")
+
+        root_layout.addWidget(gp_group)
 
         # --- Boundary Conditions group ---
         bc_group = QGroupBox("Boundary Conditions")
@@ -198,14 +177,11 @@ class PreferencesDialog(QDialog):
 
     def _sync_from_state(self):
         s = self._state.settings
-        self.spn_tol.setValue(s.get("tolerance", 0.01))
-        self.spn_iter.setValue(s.get("max_iterations", 60))
-        self.spn_step.setValue(s.get("initial_step_size", 0.05))
-        self.spn_max_steps.setValue(s.get("max_steps", 100))
-        self.spn_disp_limit.setValue(s.get("max_displacement_limit", 10.0))
         self.chk_al.setChecked(s.get("use_arc_length", False))
         self.chk_pardiso.setChecked(s.get("use_pardiso", True) and HAS_PARDISO)
         self.spn_max_logs.setValue(s.get("max_log_files", 5))
+
+        self.spn_kw.setValue(s.get("k_w", 2.2e6))
         
         # Sync BCs
         bc_x_min = s.get("bc_x_min", "roller_x")
@@ -224,14 +200,10 @@ class PreferencesDialog(QDialog):
 
     def _on_save_clicked(self):
         data = {
-            "tolerance": self.spn_tol.value(),
-            "max_iterations": self.spn_iter.value(),
-            "initial_step_size": self.spn_step.value(),
-            "max_steps": self.spn_max_steps.value(),
-            "max_displacement_limit": self.spn_disp_limit.value(),
             "use_arc_length": self.chk_al.isChecked(),
             "use_pardiso": self.chk_pardiso.isChecked(),
             "max_log_files": self.spn_max_logs.value(),
+            "k_w": self.spn_kw.value(),
             "bc_x_min": self.cmb_x_min.currentData() or "roller_x",
             "bc_x_max": self.cmb_x_max.currentData() or "roller_x",
             "bc_y_min": self.cmb_y_min.currentData() or "fixed",
@@ -243,5 +215,6 @@ class PreferencesDialog(QDialog):
         from PySide6.QtCore import QSettings
         qs = QSettings("DaharEngineer", "TerraSim")
         qs.setValue("max_log_files", data["max_log_files"])
+        qs.setValue("k_w", data["k_w"])
 
         self.accept()

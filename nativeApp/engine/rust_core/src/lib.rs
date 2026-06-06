@@ -14,6 +14,7 @@ fn terrasim_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(material_models::mohr_coulomb::return_mapping_mohr_coulomb_py, m)?)?;
     m.add_function(wrap_pyfunction!(material_models::hoek_brown::hoek_brown_yield_py, m)?)?;
     m.add_function(wrap_pyfunction!(material_models::hoek_brown::return_mapping_hoek_brown_py, m)?)?;
+    m.add_function(wrap_pyfunction!(material_models::hardening_soil::return_mapping_hardening_soil_py, m)?)?;
 
     // Solver Kernels (batch loop)
     m.add_function(wrap_pyfunction!(solver_kernel::compute_stresses_loop_py, m)?)?;

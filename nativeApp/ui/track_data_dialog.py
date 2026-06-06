@@ -37,7 +37,7 @@ class TrackDataDialog(QDialog):
                 background-color: #ffffff;
             }
             .Sidebar {
-                background-color: #f8fafc;
+                background-color: #ffffff;
                 border-right: 1px solid #e2e8f0;
                 min-width: 200px;
                 max-width: 200px;
@@ -72,7 +72,7 @@ class TrackDataDialog(QDialog):
                 color: #334155;
             }
             QScrollArea {
-                border: none;
+                border: 1px solid #e2e8f0;
                 background: transparent;
             }
             QCheckBox {
@@ -104,6 +104,7 @@ class TrackDataDialog(QDialog):
         
         # 1. Map phase durations and parent relationships
         durations = {} # phase_id -> total_steps
+        max_m_stages = {} # phase_id -> max_m_stage
         parent_map = {} # phase_id -> parent_id
         phase_dict = {} # phase_id -> phase_obj
         
@@ -118,24 +119,40 @@ class TrackDataDialog(QDialog):
                 if td:
                     sample_pid = list(td.keys())[0]
                     durations[pid] = len(td[sample_pid])
+                    if len(td[sample_pid]) > 0:
+                        max_m_stages[pid] = td[sample_pid][-1].get("m_stage", 1.0)
+                    else:
+                        max_m_stages[pid] = 1.0
                 else:
                     durations[pid] = 0
+                    max_m_stages[pid] = 1.0
             else:
                 durations[pid] = 0
+                max_m_stages[pid] = 1.0
 
         # 2. Calculate branch-aware global offsets
         # offset[pid] = sum of durations of all ancestors
         offsets = {}
+        m_stage_offsets = {}
         def get_offset(pid):
-            if pid in offsets: return offsets[pid]
+            if pid in offsets: return offsets[pid], m_stage_offsets[pid]
             parent_id = parent_map.get(pid)
             if not parent_id or parent_id not in phase_dict:
                 offsets[pid] = 0
-                return 0
+                m_stage_offsets[pid] = 0.0
+                return 0, 0.0
             # Offset is the offset of the parent + the duration of the parent
-            off = get_offset(parent_id) + durations.get(parent_id, 0)
-            offsets[pid] = off
-            return off
+            off_dur, off_m = get_offset(parent_id)
+            off_dur += durations.get(parent_id, 0)
+            
+            p_max_m = max_m_stages.get(parent_id, 1.0)
+            if phase_dict[parent_id].get("phase_type") == "safety_analysis":
+                p_max_m = 0.0  # SRM phases don't progress standard physical time
+                
+            off_m += p_max_m
+            offsets[pid] = off_dur
+            m_stage_offsets[pid] = off_m
+            return off_dur, off_m
 
         for p in phases_list:
             get_offset(p.get("id"))
@@ -167,7 +184,8 @@ class TrackDataDialog(QDialog):
                     
                     # 1. Calculated Steps
                     entry["step_local"] = i + 1
-                    entry["step_global"] = offset + i + 1
+                    entry["step_global"] = offsets.get(pid_phase, 0) + i + 1
+                    entry["m_stage_global"] = m_stage_offsets.get(pid_phase, 0.0) + s.get("m_stage", 0.0)
                     
                     # 2. Local vs Global Displacement
                     lux = entry.get("ux", 0)
@@ -334,7 +352,7 @@ class TrackDataDialog(QDialog):
                 # Field categories
                 # Categories for grouping in UI
                 categories = {
-                    "--- PROJECT DATA ---": ["step_global", "step_local", "m_stage", "force_x", "force_y"],
+                    "--- PROJECT DATA ---": ["m_stage_global", "step_global", "step_local", "m_stage", "force_x", "force_y"],
                     "--- POINT DATA ---": []
                 }
                 
@@ -366,6 +384,7 @@ class TrackDataDialog(QDialog):
                 
                 # Prettify map
                 pretty = {
+                    "m_stage_global": "Cumulative Phase Time (Pseudo-Time)",
                     "step_global": "Step (Global)",
                     "step_local": "Step (Local)",
                     "m_stage": "Multiplier (Mstage)",
@@ -405,14 +424,15 @@ class TrackDataDialog(QDialog):
                         # but simple way is to check it in indexChanged.
                         # For now, just add items with indentation.
                         for f in items:
-                            if f in all_keys or f in ["step_global", "step_local"]: # Some are calculated
+                            if f in all_keys or f in ["m_stage_global", "step_global", "step_local"]: # Some are calculated
                                 label = pretty.get(f, f.replace("_", " ").title())
                                 u = units.get(f, "")
                                 if u: label += f" {u}"
                                 combo.addItem(f"  {label}", f)
                 
                 # Defaults
-                def_x = self.x_axis_combo.findData("force_y")
+                def_x = self.x_axis_combo.findData("m_stage_global")
+                if def_x < 0: def_x = self.x_axis_combo.findData("force_y")
                 if def_x < 0: def_x = self.x_axis_combo.findData("step_global")
                 if def_x >= 0: self.x_axis_combo.setCurrentIndex(def_x)
                 

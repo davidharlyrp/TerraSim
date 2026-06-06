@@ -3,9 +3,10 @@ Phase Solver Module
 Main FEA solver loop implementing M-Stage load advancement and Newton-Raphson iteration.
 Handles multiple analysis phases including K0 procedure, plastic analysis, and safety analysis.
 """
+
 import numpy as np
 import time
-from typing import List, Dict, Optional
+# from typing import List, Dict, Optional
 from engine.models import (
     SolverRequest, SolverResponse, NodeResult, StressResult, MaterialModel, DrainageType, Point,
     MeshResponse, Material, PhaseType, SolverSettings, PhaseResult, BeamResult
@@ -13,7 +14,6 @@ from engine.models import (
 try:
     from engine.error import ErrorCode, get_error_info
 except ImportError:
-    # Fallback if not yet fully integrated
     ErrorCode = None
     get_error_info = lambda x: str(x)
 
@@ -27,10 +27,7 @@ try:
 except ImportError:
     pardiso_spsolve = scipy_spsolve
     HAS_PARDISO = False
-# old solver
-# from scipy.sparse.linalg import spsolve
 
-from numba import njit
 from .element_quad9 import (
     compute_element_matrices_quad9,
     GAUSS_WEIGHTS_2D,
@@ -58,6 +55,86 @@ def format_duration(seconds: float) -> str:
     else:
         return f"{s:.2f}s"
 
+def solve_beam(embedded_beams,beam_assign_map,beam_mat_map,nodes):
+    beam_props_all=[]
+    for b_idx, beam in enumerate(embedded_beams):
+        if beam.id not in beam_assign_map: continue
+        assign = beam_assign_map[beam.id]
+        
+        # Beam Nodes (1-based from assignment)
+        b_nodes = [nid - 1 for nid in assign.nodes] # 0-based
+        if len(b_nodes) < 2: continue
+
+        # Ensure consistent orientation (Y-first then X)
+        # This prevents sawtooth in slanted beams due to inconsistent T-matrices.
+        if len(b_nodes) >= 2:
+            n1_coord = nodes[b_nodes[0]]
+            n2_coord = nodes[b_nodes[-1]]
+            # Standardize: n1 should be higher (larger Y)
+            if n1_coord[1] < n2_coord[1] or (n1_coord[1] == n2_coord[1] and n1_coord[0] > n2_coord[0]):
+                b_nodes.reverse()
+
+        mat = beam_mat_map.get(beam.materialId)
+        if not mat: continue
+
+        # First pass: compute lengths and basic properties
+        segments = []
+        for i in range(len(b_nodes) - 1):
+            n1 = b_nodes[i]
+            n2 = b_nodes[i+1]
+            coords = np.array([nodes[n1], nodes[n2]])
+            L = np.linalg.norm(coords[1] - coords[0])
+            if L < 1e-9: continue # Skip zero-length segments
+            segments.append({'nodes': [n1, n2], 'coords': coords, 'L': L})
+        
+        # Second pass: calculate capacities 
+        # (Capacities are cumulative from tip resistance at the bottom)
+        t_max = mat.skinFrictionMax
+        f_tip = mat.tipResistanceMax
+        spacing = mat.spacing
+        inv_spacing = 1.0 / spacing if spacing > 1e-9 else 1.0
+        
+        # Pre-calculate capacities for each segment to allow forward iteration
+        seg_capacities = [0.0] * len(segments)
+        curr_cap = f_tip * inv_spacing
+        for i in range(len(segments) - 1, -1, -1):
+            seg = segments[i]
+            curr_cap += (t_max * seg['L']) * inv_spacing
+            seg_capacities[i] = curr_cap
+
+        # Resolve global head node for this beam (Head-to-Tip ordering)
+        h_idx = beam.head_point_index or 0 # 0=P1, 1=P2
+        global_head_gi = b_nodes[0] if h_idx == 0 else b_nodes[-1]
+        head_conn_type = str(beam.head_connection_type).upper()
+
+        # Iterate segments from Head to Tip (0 to N) to ensure correct result ordering
+        for i in range(len(segments)):
+            seg = segments[i]
+            
+            # Compute K_frame and F_grav
+            E = mat.youngsModulus
+            A = mat.crossSectionArea
+            I = getattr(mat, 'momentOfInertia', 1e-6)
+            unit_weight = mat.unitWeight
+            
+            K_b, F_grav_b = compute_beam_element_matrix(seg['coords'], E, A, I, spacing, unit_weight, kh=0.0, kv=0.0)
+            
+            beam_props_all.append({
+                'id': f"{beam.id}_seg_{i}",
+                'beam_index': b_idx,
+                'nodes': seg['nodes'],
+                'coords': seg['coords'],
+                'L': seg['L'],
+                'K': K_b,
+                'F_grav': F_grav_b,
+                'material': mat,
+                'beam_id': beam.id,
+                'capacity': seg_capacities[i],
+                'spacing': spacing,
+                'global_head_gi': global_head_gi,
+                'head_connection_type': head_conn_type
+            })
+    return beam_props_all
 
 def solve_phases(request: SolverRequest, should_stop=None):
     total_start_time = time.time()
@@ -65,21 +142,19 @@ def solve_phases(request: SolverRequest, should_stop=None):
     settings = request.settings
     
     log = []
-    
-    # === 0. Settings Validation (Safety Guard) ===
     validation_errors = []
-    if settings.tolerance < 0.001 or settings.tolerance > 0.1:
-        validation_errors.append(get_error_info(ErrorCode.VAL_TOLERANCE_OOB))
-    if settings.max_iterations < 1 or settings.max_iterations > 100:
-        validation_errors.append(get_error_info(ErrorCode.VAL_ITERATIONS_OOB))
-    if settings.initial_step_size < 0.001 or settings.initial_step_size > 1.0:
-        validation_errors.append(get_error_info(ErrorCode.VAL_STEP_SIZE_OOB))
-    if settings.max_load_fraction < 0.01 or settings.max_load_fraction > 1.0:
-        validation_errors.append(get_error_info(ErrorCode.VAL_LOAD_FRAC_OOB))
-    if settings.max_steps < 1 or settings.max_steps > 1000:
-        validation_errors.append(get_error_info(ErrorCode.VAL_MAX_STEPS_OOB))
-    if (settings.min_desired_iterations or 0) > (settings.max_desired_iterations or 100):
-         validation_errors.append(get_error_info(ErrorCode.VAL_ITER_MISMATCH))
+    # if settings.tolerance < 0.001 or settings.tolerance > 0.1:
+    #     validation_errors.append(get_error_info(ErrorCode.VAL_TOLERANCE_OOB))
+    # if settings.max_iterations < 1 or settings.max_iterations > 100:
+    #     validation_errors.append(get_error_info(ErrorCode.VAL_ITERATIONS_OOB))
+    # if settings.initial_step_size < 0.001 or settings.initial_step_size > 1.0:
+    #     validation_errors.append(get_error_info(ErrorCode.VAL_STEP_SIZE_OOB))
+    # if settings.max_load_fraction < 0.01 or settings.max_load_fraction > 1.0:
+    #     validation_errors.append(get_error_info(ErrorCode.VAL_LOAD_FRAC_OOB))
+    # if settings.max_steps < 1 or settings.max_steps > 1000:
+    #     validation_errors.append(get_error_info(ErrorCode.VAL_MAX_STEPS_OOB))
+    # if (settings.min_desired_iterations or 0) > (settings.max_desired_iterations or 100):
+    #      validation_errors.append(get_error_info(ErrorCode.VAL_ITER_MISMATCH))
     # if len(mesh.elements) > 10000:
     #     validation_errors.append(get_error_info(ErrorCode.VAL_OVER_ELEMENT_LIMIT))
 
@@ -113,7 +188,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
     
     global_fixed_dofs = set()
     global_fixed_nodes = set()
-    global_full_fixed_nodes = set() # Tracking for beam pin conflict warnings
+    global_full_fixed_nodes = set()
 
     bc_settings = {
         "x_min": (settings.bc_x_min or "roller_x").lower(),
@@ -145,7 +220,6 @@ def solve_phases(request: SolverRequest, should_stop=None):
     # Material and Polygon Map
     elem_props_all = [] # List of all possible elements
     
-    # Process water level polyline: convert Points to Dicts if necessary
     # Process water level polyline: convert Points to Dicts
     # NEW: Map ID -> List[Dict]
     water_levels_map = {}
@@ -155,7 +229,6 @@ def solve_phases(request: SolverRequest, should_stop=None):
     
     # Fallback/Default handling
     default_water_level = None
-    # Legacy `water_level` removed. If no water_levels defined, default is Dry (None).
     
     # Track current water level to detect changes
     current_water_level_data = default_water_level
@@ -207,83 +280,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
     beam_assign_map = {a.beam_id: a for a in (mesh.embedded_beam_assignments or [])}
     
     if request.embedded_beams:
-        for b_idx, beam in enumerate(request.embedded_beams):
-            if beam.id not in beam_assign_map: continue
-            assign = beam_assign_map[beam.id]
-            
-            # Beam Nodes (1-based from assignment)
-            b_nodes = [nid - 1 for nid in assign.nodes] # 0-based
-            if len(b_nodes) < 2: continue
-
-            # Ensure consistent orientation (Y-first then X)
-            # This prevents sawtooth in slanted beams due to inconsistent T-matrices.
-            if len(b_nodes) >= 2:
-                n1_coord = nodes[b_nodes[0]]
-                n2_coord = nodes[b_nodes[-1]]
-                # Standardize: n1 should be higher (larger Y)
-                if n1_coord[1] < n2_coord[1] or (n1_coord[1] == n2_coord[1] and n1_coord[0] > n2_coord[0]):
-                    b_nodes.reverse()
-
-            mat = beam_mat_map.get(beam.materialId)
-            if not mat: continue
-
-            # First pass: compute lengths and basic properties
-            segments = []
-            for i in range(len(b_nodes) - 1):
-                n1 = b_nodes[i]
-                n2 = b_nodes[i+1]
-                coords = np.array([nodes[n1], nodes[n2]])
-                L = np.linalg.norm(coords[1] - coords[0])
-                if L < 1e-9: continue # Skip zero-length segments
-                segments.append({'nodes': [n1, n2], 'coords': coords, 'L': L})
-            
-            # Second pass: calculate capacities 
-            # (Capacities are cumulative from tip resistance at the bottom)
-            t_max = mat.skinFrictionMax
-            f_tip = mat.tipResistanceMax
-            spacing = mat.spacing
-            inv_spacing = 1.0 / spacing if spacing > 1e-9 else 1.0
-            
-            # Pre-calculate capacities for each segment to allow forward iteration
-            seg_capacities = [0.0] * len(segments)
-            curr_cap = f_tip * inv_spacing
-            for i in range(len(segments) - 1, -1, -1):
-                seg = segments[i]
-                curr_cap += (t_max * seg['L']) * inv_spacing
-                seg_capacities[i] = curr_cap
-
-            # Resolve global head node for this beam (Head-to-Tip ordering)
-            h_idx = beam.head_point_index or 0 # 0=P1, 1=P2
-            global_head_gi = b_nodes[0] if h_idx == 0 else b_nodes[-1]
-            head_conn_type = str(beam.head_connection_type).upper()
-
-            # Iterate segments from Head to Tip (0 to N) to ensure correct result ordering
-            for i in range(len(segments)):
-                seg = segments[i]
-                
-                # Compute K_frame and F_grav
-                E = mat.youngsModulus
-                A = mat.crossSectionArea
-                I = getattr(mat, 'momentOfInertia', 1e-6)
-                unit_weight = mat.unitWeight
-                
-                K_b, F_grav_b = compute_beam_element_matrix(seg['coords'], E, A, I, spacing, unit_weight, kh=0.0, kv=0.0)
-                
-                beam_props_all.append({
-                    'id': f"{beam.id}_seg_{i}",
-                    'beam_index': b_idx,
-                    'nodes': seg['nodes'],
-                    'coords': seg['coords'],
-                    'L': seg['L'],
-                    'K': K_b,
-                    'F_grav': F_grav_b,
-                    'material': mat,
-                    'beam_id': beam.id,
-                    'capacity': seg_capacities[i],
-                    'spacing': spacing,
-                    'global_head_gi': global_head_gi,
-                    'head_connection_type': head_conn_type
-                })
+        beam_props_all=solve_beam(request.embedded_beams,beam_assign_map,beam_mat_map,nodes)
 
     # Global state per Gauss point (9 per Quad9 element)
     total_displacement = np.zeros(num_dof)
@@ -291,6 +288,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
     element_strain_state = {ep['id']: [np.zeros(3) for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
     element_yield_state = {ep['id']: [False for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
     element_pwp_excess_state = {ep['id']: [0.0 for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
+    element_state_vars = {ep['id']: [[0.0, 1.0] for _ in range(NUM_GAUSS_POINTS)] for ep in elem_props_all}
     
     phase_results = []
     
@@ -329,6 +327,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         'element_strain_state': copy.deepcopy(element_strain_state),
         'element_yield_state': copy.deepcopy(element_yield_state),
         'element_pwp_excess_state': copy.deepcopy(element_pwp_excess_state),
+        'element_state_vars': copy.deepcopy(element_state_vars),
         'current_water_level_data': copy.deepcopy(current_water_level_data),
         'current_water_level_id': current_water_level_id,
         'elem_materials': {ep['id']: (ep['material'], ep['K'].copy(), ep['F_grav'].copy(), ep['D'].copy(), copy.deepcopy(ep['gauss_points'])) for ep in elem_props_all},
@@ -383,8 +382,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
             element_strain_state = copy.deepcopy(snapshot['element_strain_state'])
             element_yield_state = copy.deepcopy(snapshot['element_yield_state'])
             element_pwp_excess_state = copy.deepcopy(snapshot['element_pwp_excess_state'])
+            element_state_vars = copy.deepcopy(snapshot['element_state_vars'])
             current_water_level_data = copy.deepcopy(snapshot['current_water_level_data'])
             current_water_level_id = snapshot['current_water_level_id']
+            elem_u_ref_map = copy.deepcopy(snapshot.get('elem_u_ref_map', {}))
             # Restore element materials from snapshot
             for ep in elem_props_all:
                 eid = ep['id']
@@ -411,8 +412,10 @@ def solve_phases(request: SolverRequest, should_stop=None):
             element_strain_state = copy.deepcopy(snapshot['element_strain_state'])
             element_yield_state = copy.deepcopy(snapshot['element_yield_state'])
             element_pwp_excess_state = copy.deepcopy(snapshot['element_pwp_excess_state'])
+            element_state_vars = copy.deepcopy(snapshot['element_state_vars'])
             current_water_level_data = copy.deepcopy(snapshot['current_water_level_data'])
             current_water_level_id = snapshot['current_water_level_id']
+            elem_u_ref_map = {}
 
         if phase.reset_displacements:
             total_displacement = np.zeros(num_dof)
@@ -551,9 +554,25 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 log.append(msg_mat)
                 yield {"type": "log", "content": msg_mat}
         
-        # 1. Identify Active/Inactive Elements
+        # 1. Identify Active Elements
         active_elem_props = [ep for ep in elem_props_all if ep['polygon_id'] in phase.active_polygon_indices]
         active_ids = {ep['id'] for ep in active_elem_props}
+        
+        # 2.0 Identify Active Elements and their Activation Reference (elem_u_ref)
+        if phase.parent_id:
+            for ep in active_elem_props:
+                eid = ep['id']
+                if eid not in elem_u_ref_map:
+                    # NEWLY ACTIVATED: Capture current total_displacement as its zero reference
+                    u_ref_e = np.zeros(18)
+                    for li, gi in enumerate(ep['nodes']):
+                        u_ref_e[li*2] = total_displacement[gi*3]
+                        u_ref_e[li*2+1] = total_displacement[gi*3+1]
+                    elem_u_ref_map[eid] = u_ref_e
+        else:
+            # Phase 1, everything starts at 0
+            for ep in active_elem_props:
+                elem_u_ref_map[ep['id']] = np.zeros(18)
         
         # 2. Identify Active Nodes
         active_node_indices = set()
@@ -613,6 +632,20 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 # Strain remains zero
                 element_strain_state[eid] = [np.zeros(3) for _ in range(NUM_GAUSS_POINTS)]
                 element_yield_state[eid] = [False for _ in range(NUM_GAUSS_POINTS)]
+                element_pwp_excess_state[eid] = [0.0 for _ in range(NUM_GAUSS_POINTS)]
+                # Initialize state variables
+                state_vars_list = []
+                for i in range(NUM_GAUSS_POINTS):
+                    sig = gp_stresses[f'gp{i+1}']
+                    s_avg = (sig[0] + sig[1]) * 0.5
+                    r = np.sqrt(((sig[0] - sig[1])*0.5)**2 + sig[2]**2)
+                    p_prime = max(0.0, -s_avg)
+                    q = 2.0 * r
+                    alpha = 1.0 # default alpha for cap
+                    p_c_init = max(1.0, np.sqrt((q*q)/(alpha*alpha) + p_prime*p_prime))
+                    state_vars_list.append([0.0, p_c_init])
+                
+                element_state_vars[eid] = state_vars_list
             
             # Reset Displacements (K0 procedure generates stress without deformation)
             total_displacement = np.zeros(num_dof)
@@ -627,9 +660,33 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 for i in range(NUM_GAUSS_POINTS):
                     gp_data = ep['gauss_points'][i]
                     sig = element_stress_state[eid][i]
+                    eps = element_strain_state[eid][i]
                     pwp_val = gp_data['pwp']
                     
                     sig_zz = sig[0] 
+                    
+                    # Calculate E used
+                    mat = ep['material']
+                    e_used = mat.effyoungsModulus or mat.youngsModulus or 10000.0
+                    if mat.material_model == MaterialModel.HARDENING_SOIL:
+                        E50_ref = mat.youngsModulus50_ref or 1e4
+                        Eur_ref = mat.youngsModulusUr_ref or 3e4
+                        m = mat.m_power or 0.5
+                        p_ref = mat.p_ref or 100.0
+                        c = mat.cohesion or 0.0
+                        phi = mat.frictionAngle or 0.0
+                        c_cos_phi = c * np.cos(np.radians(phi))
+                        sin_phi = np.sin(np.radians(phi))
+                        s_avg = (sig[0] + sig[1]) * 0.5
+                        r_val = np.sqrt(((sig[0] - sig[1])*0.5)**2 + sig[2]**2)
+                        sig_3 = s_avg - r_val
+                        if sig_3 > -1.0:
+                            sig_3 = -1.0
+                        sig_3_c = -sig_3
+                        term = (c_cos_phi + sig_3_c * sin_phi) / (c_cos_phi + p_ref * sin_phi)
+                        if term < 0.001:
+                            term = 0.001
+                        e_used = Eur_ref * (term ** m)
                     
                     p_stresses.append(StressResult(
                         element_id=eid, 
@@ -638,7 +695,9 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         sig_zz=sig_zz, 
                         pwp_steady=pwp_val,
                         pwp_total=pwp_val,
-                        is_yielded=False, m_stage=1.0
+                        is_yielded=False, m_stage=1.0,
+                        eps_xx=eps[0], eps_yy=eps[1], eps_xy=eps[2],
+                        e_used=float(e_used)
                     ))
             
             phase_results.append({
@@ -981,54 +1040,48 @@ def solve_phases(request: SolverRequest, should_stop=None):
         delta_F_external += delta_F_grav_material
         
         # D.1 Pseudo-static Force Adjustment (Handling changes in kh/kv for already active elements)
-        kh_curr = getattr(phase, "kh", 0.0)
-        kv_curr = getattr(phase, "kv", 0.0)
-        kh_prev = getattr(parent_phase, "kh", 0.0) if parent_phase else 0.0
-        kv_prev = getattr(parent_phase, "kv", 0.0) if parent_phase else 0.0
-        
-        if (abs(kh_curr - kh_prev) > 1e-9 or abs(kv_curr - kv_prev) > 1e-9):
-            msg_ps = f"Applying pseudo-static increment: kh({kh_prev}->{kh_curr}), kv({kv_prev}->{kv_curr})"
-            log.append(msg_ps); yield {"type": "log", "content": msg_ps}
-            
-            # Update gravity for all elements to match current phase coeffs
-            for ep in elem_props_all:
-                poly_id = ep['polygon_id']
-                # If it was already active, we must apply the LOAD DIFFERENCE.
-                # If it's newly active, its ep['F_grav'] is already correct from rebuild OR 
-                # we need to ensure it uses current kh/kv.
-                
-                # Re-calculate current target F_grav
-                coords = np.array([nodes[n] for n in ep['nodes']])
-                _, F_grav_curr, _, _ = compute_element_matrices_quad9(
-                    coords, ep['material'], water_level=current_water_level_data,
-                    kh=kh_curr, kv=kv_curr
-                )
-                
-                if poly_id in parent_active_indices and poly_id in current_active_indices:
-                    # Remaining active -> Apply increment
-                    for li in range(9):
-                        gi = ep['nodes'][li]
-                        delta_F_external[gi*3] += (F_grav_curr[li*2] - ep['F_grav'][li*2])
-                        delta_F_external[gi*3+1] += (F_grav_curr[li*2+1] - ep['F_grav'][li*2+1])
-                
-                # Update ep['F_grav'] to the new values for future phases
-                ep['F_grav'] = F_grav_curr
+        # Safety Analysis (SRM) inherits the parent's stressed state; do not re-apply PS increments.
+        if phase.phase_type != PhaseType.SAFETY_ANALYSIS:
+            kh_curr = getattr(phase, "kh", 0.0)
+            kv_curr = getattr(phase, "kv", 0.0)
+            kh_prev = getattr(parent_phase, "kh", 0.0) if parent_phase else 0.0
+            kv_prev = getattr(parent_phase, "kv", 0.0) if parent_phase else 0.0
 
-            # Beam adjustment
-            for bp in beam_props_all:
-                beam_id = bp['beam_id']
-                _, F_grav_b_curr = compute_beam_element_matrix(
-                    bp['coords'], bp['material'].youngsModulus, bp['material'].crossSectionArea, 
-                    getattr(bp['material'], 'momentOfInertia', 1e-6),
-                    bp['spacing'], bp['material'].unitWeight, kh=kh_curr, kv=kv_curr
-                )
-                if beam_id in parent_active_beam_ids and beam_id in current_active_beam_ids:
-                    for li in range(2):
-                        gi = bp['nodes'][li]
-                        delta_F_external[gi*3] += (F_grav_b_curr[li*3] - bp['F_grav'][li*3])
-                        delta_F_external[gi*3+1] += (F_grav_b_curr[li*3+1] - bp['F_grav'][li*3+1])
-                        delta_F_external[gi*3+2] += (F_grav_b_curr[li*3+2] - bp['F_grav'][li*3+2])
-                bp['F_grav'] = F_grav_b_curr
+            if abs(kh_curr - kh_prev) > 1e-9 or abs(kv_curr - kv_prev) > 1e-9:
+                msg_ps = f"Applying pseudo-static increment: kh({kh_prev}->{kh_curr}), kv({kv_prev}->{kv_curr})"
+                log.append(msg_ps); yield {"type": "log", "content": msg_ps}
+
+                # Update gravity for all elements to match current phase coeffs
+                for ep in elem_props_all:
+                    poly_id = ep['polygon_id']
+                    coords = np.array([nodes[n] for n in ep['nodes']])
+                    _, F_grav_curr, _, _ = compute_element_matrices_quad9(
+                        coords, ep['material'], water_level=current_water_level_data,
+                        kh=kh_curr, kv=kv_curr
+                    )
+
+                    if poly_id in parent_active_indices and poly_id in current_active_indices:
+                        for li in range(9):
+                            gi = ep['nodes'][li]
+                            delta_F_external[gi*3] += (F_grav_curr[li*2] - ep['F_grav'][li*2])
+                            delta_F_external[gi*3+1] += (F_grav_curr[li*2+1] - ep['F_grav'][li*2+1])
+
+                    ep['F_grav'] = F_grav_curr
+
+                for bp in beam_props_all:
+                    beam_id = bp['beam_id']
+                    _, F_grav_b_curr = compute_beam_element_matrix(
+                        bp['coords'], bp['material'].youngsModulus, bp['material'].crossSectionArea,
+                        getattr(bp['material'], 'momentOfInertia', 1e-6),
+                        bp['spacing'], bp['material'].unitWeight, kh=kh_curr, kv=kv_curr
+                    )
+                    if beam_id in parent_active_beam_ids and beam_id in current_active_beam_ids:
+                        for li in range(2):
+                            gi = bp['nodes'][li]
+                            delta_F_external[gi*3] += (F_grav_b_curr[li*3] - bp['F_grav'][li*3])
+                            delta_F_external[gi*3+1] += (F_grav_b_curr[li*3+1] - bp['F_grav'][li*3+1])
+                            delta_F_external[gi*3+2] += (F_grav_b_curr[li*3+2] - bp['F_grav'][li*3+2])
+                    bp['F_grav'] = F_grav_b_curr
         
         # D.2 Calculate TOTAL PROJECT LOADS for tracking (Global Values)
         total_parent_fx = np.sum(parent_load_vectors[0::3])
@@ -1095,9 +1148,6 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 F_int_initial[gi*3+1] += f_int_b_start[li*3+1]
                 F_int_initial[gi*3+2] += f_int_b_start[li*3+2]
                 
-                # REFOUND SAMPAH: Removed the redundant +1.0 * total_displacement[gi*3+2] here
-                # because it is already handled globally at line 1030.
-        
         # Notify UI that a new phase is starting
         is_srm = (phase.phase_type == PhaseType.SAFETY_ANALYSIS)
         yield {"type": "phase_start", "content": {"phase_id": phase.id, "phase_name": phase.name, "is_safety": is_srm}}
@@ -1127,7 +1177,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         else:
             current_m_stage = 0.0
             
-        step_size = settings.initial_step_size
+        step_size = phase.initial_step_size
         step_count = 0
         phase_step_points = [{"m_stage": float(current_m_stage), "max_disp": 0.0}]
         yield {"type": "step_point", "content": {"m_stage": float(current_m_stage), "max_disp": 0.0}}
@@ -1138,9 +1188,11 @@ def solve_phases(request: SolverRequest, should_stop=None):
         phase_strain_history = {eid: [s.copy() for s in ls] for eid, ls in element_strain_state.items()}
         phase_yield_history = {eid: [y for y in ls] for eid, ls in element_yield_state.items()}
         phase_pwp_excess_history = {eid: [p for p in ls] for eid, ls in element_pwp_excess_state.items()}
+        phase_state_vars_history = {eid: [[sv[0], sv[1]] for sv in ls] for eid, ls in element_state_vars.items()}
         
         # Tangent stiffness per Gauss point (9 per element)
         element_tangent_matrices = {}
+        Kw = request.settings.k_w
         for ep in active_elem_props:
             D_init_gps = []
             mat = ep['material']
@@ -1149,8 +1201,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 if mat.drainage_type in [DrainageType.UNDRAINED_A, DrainageType.UNDRAINED_B]:
                     # Add volumetric stiffening (Penalty Bulk Modulus of Water)
                     # For Undrained A/B using effective modulus, we stiffen the tangent
-                    Kw = 2.2e6 # kPa
-                    porosity = 0.3
+                    void_ratio = mat.voidRatio
+                    porosity = void_ratio / (1.0 + void_ratio)
                     penalty = Kw / porosity
                     E_skel = mat.effyoungsModulus or 10000.0
                     nu_skel = mat.poissonsRatio or 0.3
@@ -1175,6 +1227,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
         pwp_static_arr = np.array([[gp['pwp'] or 0.0 for gp in ep['gauss_points']] for ep in active_elem_props])
         weights_arr = GAUSS_WEIGHTS_2D
         D_elastic_arr = np.array([ep['D'] for ep in active_elem_props])
+        elem_u_ref_arr = np.array([elem_u_ref_map.get(ep['id'], np.zeros(18)) for ep in active_elem_props], dtype=np.float64)
         
         # Drainage mapping: 0: DRAINED, 1: UNDRAINED_A, 2: UNDRAINED_B, 3: UNDRAINED_C, 4: NON_POROUS
         drainage_map = {
@@ -1194,7 +1247,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             mat = ep['material']
             penalty = 0.0
             if mat.drainage_type in [DrainageType.UNDRAINED_A, DrainageType.UNDRAINED_B]:
-                # Penalty Value (Bulk Modulus Air)
+                # Penalty Value (Bulk Modulus Water)
                 # Assume water bulk modulus Kw = 2.2e6 kPa and porosity = 0.3
                 Kw = 2.2e6; porosity = 0.3; penalty = Kw / porosity
                 E_skel = mat.effyoungsModulus or 10000.0
@@ -1227,6 +1280,13 @@ def solve_phases(request: SolverRequest, should_stop=None):
         mat_mb_arr = []
         mat_s_arr = []
         mat_a_arr = []
+        
+        # Hardening Soil parameters
+        mat_e50_ref_arr = []
+        mat_e_oed_ref_arr = []
+        mat_e_ur_ref_arr = []
+        mat_m_power_arr = []
+        mat_p_ref_arr = []
 
         for i, ep in enumerate(active_elem_props):
             mat = ep['material']
@@ -1259,6 +1319,13 @@ def solve_phases(request: SolverRequest, should_stop=None):
             mat_mb_arr.append(m_b_calc)
             mat_s_arr.append(s_calc)
             mat_a_arr.append(a_calc)
+            
+            # Hardening soil defaults
+            mat_e50_ref_arr.append(mat.youngsModulus50_ref or 1e4)
+            mat_e_oed_ref_arr.append(mat.youngsModulusOed_ref or 1e4)
+            mat_e_ur_ref_arr.append(mat.youngsModulusUr_ref or 3e4)
+            mat_m_power_arr.append(mat.m_power or 0.5)
+            mat_p_ref_arr.append(mat.p_ref or 100.0)
 
         mat_sigma_ci_arr = np.array(mat_sigma_ci_arr)
         mat_gsi_arr = np.array(mat_gsi_arr)
@@ -1266,6 +1333,11 @@ def solve_phases(request: SolverRequest, should_stop=None):
         mat_mb_arr = np.array(mat_mb_arr)
         mat_s_arr = np.array(mat_s_arr)
         mat_a_arr = np.array(mat_a_arr)
+        mat_e50_ref_arr = np.array(mat_e50_ref_arr)
+        mat_e_oed_ref_arr = np.array(mat_e_oed_ref_arr)
+        mat_e_ur_ref_arr = np.array(mat_e_ur_ref_arr)
+        mat_m_power_arr = np.array(mat_m_power_arr)
+        mat_p_ref_arr = np.array(mat_p_ref_arr)
 
         # Check if phase failed due to validation
         if phase.id in failed_phases:
@@ -1326,12 +1398,15 @@ def solve_phases(request: SolverRequest, should_stop=None):
         def _compute_stresses(total_u_cand, tgt_m):
             # Use current step-start state arrays (will be defined in loop, or initial state for pre-equil)
             return compute_elements_stresses_rust(
-                elem_nodes_arr, total_u_cand,
+                elem_nodes_arr, total_u_cand, elem_u_ref_arr,
                 step_start_stress_arr, step_start_strain_arr, step_start_pwp_arr,
+                step_start_state_vars_arr,
                 B_matrices_arr, det_J_arr, weights_arr, D_elastic_arr, pwp_static_arr,
                 mat_drainage_arr, mat_model_arr, mat_c_arr, mat_phi_arr, mat_su_arr,
                 mat_sigma_ci_arr, mat_gsi_arr, mat_disturb_factor_arr,
-                mat_mb_arr, mat_s_arr, mat_a_arr, penalties_arr,
+                mat_mb_arr, mat_s_arr, mat_a_arr, 
+                mat_e50_ref_arr, mat_e_oed_ref_arr, mat_e_ur_ref_arr, mat_m_power_arr, mat_p_ref_arr,
+                penalties_arr,
                 is_srm, is_gravity_phase, tgt_m, num_dof
             )
 
@@ -1372,6 +1447,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             step_start_stress_arr = np.array([element_stress_state[ep['id']] for ep in active_elem_props])
             step_start_strain_arr = np.array([element_strain_state[ep['id']] for ep in active_elem_props])
             step_start_pwp_arr = np.array([element_pwp_excess_state[ep['id']] for ep in active_elem_props])
+            step_start_state_vars_arr = np.array([element_state_vars[ep['id']] for ep in active_elem_props])
             
             # Initial Residual: F_ext(m=0) - F_int(u_initial)
             # R = F_int_initial + (0 * delta_F_external) - F_int_calculated
@@ -1385,7 +1461,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             R_initial_free = R_initial[free_dofs]
             f_norm_base = max(np.linalg.norm(F_int_initial[free_dofs]), 1.0)
             
-            if np.linalg.norm(R_initial_free) / f_norm_base > settings.tolerance:
+            if np.linalg.norm(R_initial_free) / f_norm_base > phase.tolerance:
                 # msg_pre = f"  > Initial imbalance detected. Performing pre-equilibrium stabilization..."
                 # log.append(msg_pre); yield {"type": "log", "content": msg_pre}; print(msg_pre)
                 
@@ -1402,15 +1478,16 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     R_initial = F_int_initial - F_int_stab
                     R_initial_free = R_initial[free_dofs]
                     
-                    if np.linalg.norm(R_initial_free) / f_norm_base < settings.tolerance:
+                    if np.linalg.norm(R_initial_free) / f_norm_base < phase.tolerance:
                         # Success: Commit equilibrium state
-                        new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = res_stab[1:]
+                        new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr, new_state_vars_arr = res_stab[1:]
                         for i, ep in enumerate(active_elem_props):
                             eid = ep['id']
                             element_stress_state[eid] = [new_stresses_arr[i, gp].copy() for gp in range(NUM_GAUSS_POINTS)]
                             element_yield_state[eid] = [new_yield_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
                             element_strain_state[eid] = [new_strain_arr[i, gp].copy() for gp in range(NUM_GAUSS_POINTS)]
                             element_pwp_excess_state[eid] = [new_pwp_excess_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
+                            element_state_vars[eid] = [new_state_vars_arr[i, gp].copy() for gp in range(NUM_GAUSS_POINTS)]
                         msg_pre_ok = f"  > Stabilization converged at iteration {pre_iter+1}."
                         log.append(msg_pre_ok); yield {"type": "log", "content": msg_pre_ok}
                         break
@@ -1424,8 +1501,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 yield {"type": "log", "content": "Analysis cancelled by user."}
                 break
             
-            if step_count > settings.max_steps: 
-                log.append(f"Max steps ({settings.max_steps}) reached. Terminating phase.")
+            if step_count > phase.max_steps: 
+                log.append(f"Max steps ({phase.max_steps}) reached. Terminating phase.")
                 break
             
             if is_srm and step_size < 0.0001:
@@ -1443,11 +1520,77 @@ def solve_phases(request: SolverRequest, should_stop=None):
             step_start_stress = {eid: [s.copy() for s in ls] for eid, ls in phase_stress_history.items()}
             step_start_strain = {eid: [s.copy() for s in ls] for eid, ls in phase_strain_history.items()}
             step_start_pwp = {eid: [p for p in ls] for eid, ls in phase_pwp_excess_history.items()}
+            step_start_state_vars = {eid: [[sv[0], sv[1]] for sv in ls] for eid, ls in phase_state_vars_history.items()}
             
             # Snapshot arrays for Numba
             step_start_stress_arr = np.array([step_start_stress[ep['id']] for ep in active_elem_props])
             step_start_strain_arr = np.array([step_start_strain[ep['id']] for ep in active_elem_props])
             step_start_pwp_arr = np.array([step_start_pwp[ep['id']] for ep in active_elem_props])
+            step_start_state_vars_arr = np.array([step_start_state_vars[ep['id']] for ep in active_elem_props])
+
+            # Update Element Tangent Matrices for Hardening Soil
+            for i, ep in enumerate(active_elem_props):
+                mat = ep['material']
+                if mat.material_model == MaterialModel.HARDENING_SOIL:
+                    eid = ep['id']
+                    D_init_gps = []
+                    # Reference properties
+                    E50_ref = mat.youngsModulus50_ref or 1e4
+                    Eur_ref = mat.youngsModulusUr_ref or 3e4
+                    m = mat.m_power or 0.5
+                    p_ref = mat.p_ref or 100.0
+                    c = mat.cohesion or 0.0
+                    phi = mat.frictionAngle or 0.0
+                    nu = mat.poissonsRatio or 0.2
+                    
+                    c_cos_phi = c * np.cos(np.radians(phi))
+                    sin_phi = np.sin(np.radians(phi))
+                    
+                    for gp_idx in range(NUM_GAUSS_POINTS):
+                        sig = step_start_stress[eid][gp_idx]
+                        # sig = [sx, sy, sxy] (tension positive)
+                        s_avg = (sig[0] + sig[1]) * 0.5
+                        r = np.sqrt(((sig[0] - sig[1])*0.5)**2 + sig[2]**2)
+                        sig_3 = s_avg - r # most compressive (most negative in tension-positive sign convention)
+                        
+                        # Limit sig_3 to a minimum compressive value (e.g., -1.0 kPa) to prevent E dropping to 0
+                        # Tension is positive, so compressive is negative. We want to cap it at -1.0
+                        if sig_3 > -1.0:
+                            sig_3 = -1.0
+                            
+                        # Convert to compressive-positive for the formula
+                        sig_3_c = -sig_3
+                        
+                        term = (c_cos_phi + sig_3_c * sin_phi) / (c_cos_phi + p_ref * sin_phi)
+                        if term < 0.001:
+                            term = 0.001 # lower bound safety
+                            
+                        # Use Eur for unloading/reloading tangent stiffness
+                        E_ur = Eur_ref * (term ** m)
+                        
+                        # Build D matrix for plane strain
+                        c1 = E_ur / ((1.0 + nu) * (1.0 - 2.0 * nu))
+                        D_gp = np.zeros((3, 3))
+                        D_gp[0, 0] = c1 * (1.0 - nu)
+                        D_gp[1, 1] = c1 * (1.0 - nu)
+                        D_gp[0, 1] = c1 * nu
+                        D_gp[1, 0] = c1 * nu
+                        D_gp[2, 2] = E_ur / (2.0 * (1.0 + nu))
+                        
+                        # Volumetric stiffening for undrained
+                        if mat.drainage_type in [DrainageType.UNDRAINED_A, DrainageType.UNDRAINED_B]:
+                            void_ratio = getattr(mat, 'voidRatio', 0.5)
+                            porosity = void_ratio / (1.0 + void_ratio)
+                            penalty = Kw / porosity
+                            K_skel = E_ur / (3.0 * (1.0 - 2.0 * nu))
+                            if penalty > 10.0 * K_skel: penalty = 10.0 * K_skel
+                            D_gp[0,0] += penalty
+                            D_gp[0,1] += penalty
+                            D_gp[1,0] += penalty
+                            D_gp[1,1] += penalty
+                            
+                        D_init_gps.append(D_gp)
+                    element_tangent_matrices[eid] = D_init_gps
 
             if use_arc_length:
                 # ==========================================
@@ -1488,10 +1631,6 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     _K_global = sp.coo_matrix((_K_values, (active_row_indices, active_col_indices)), shape=(num_dof, num_dof)).tocsr()
                     return _K_global[free_dofs, :][:, free_dofs]
                 
-                pass
-                
-                pass
-                
                 # Compute initial arc-length radius on first step OF THE PHASE
                 if arc_length_radius == 0.0:
                     # For SRM: compute F_ref by perturbation of Msf
@@ -1527,8 +1666,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     delta_F_external=delta_F_external,
                     total_displacement=total_displacement,
                     current_u_incremental=current_u_incremental,
-                    max_iterations=settings.max_iterations,
-                    tolerance=settings.tolerance,
+                    max_iterations=phase.max_iterations,
+                    tolerance=phase.tolerance,
                     arc_length_radius=arc_length_radius,
                     sign_lambda=sign_lambda,
                     current_m_stage=current_m_stage,
@@ -1552,11 +1691,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         target_m_stage = min(target_m_stage, 1.0)
                     
                     # Re-map stress data
-                    new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = al_result['stress_data']
+                    new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr, new_state_vars_arr = al_result['stress_data']
                     temp_phase_stress = {ep['id']: [new_stresses_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
                     temp_phase_yield = {ep['id']: [new_yield_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
                     temp_phase_strain = {ep['id']: [new_strain_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
                     temp_phase_pwp_excess = {ep['id']: [new_pwp_excess_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
+                    temp_phase_state_vars = {ep['id']: [new_state_vars_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)] for i, ep in enumerate(active_elem_props)}
                 else:
                     # ARC LENGTH FAILURE -> Retry with smaller radius
                     msg_fail = f"  > Arc-Length failed at {m_type} {current_m_stage:.4f}: {al_result.get('error', 'Non-convergence')}"
@@ -1586,39 +1726,15 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 converged = False
                 step_du = np.zeros(num_dof) 
                 
-                while iteration < settings.max_iterations:
+                while iteration < phase.max_iterations:
                     iteration += 1
                     
                     total_u_candidate = total_displacement + current_u_incremental + step_du
                     
                     # Compute Internal Forces and Stress Update (Rust Kernel)
-                    F_int, new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr = compute_elements_stresses_rust(
-                        elem_nodes_arr,
+                    F_int, new_stresses_arr, new_yield_arr, new_strain_arr, new_pwp_excess_arr, new_state_vars_arr = _compute_stresses(
                         total_u_candidate,
-                        step_start_stress_arr,
-                        step_start_strain_arr,
-                        step_start_pwp_arr,
-                        B_matrices_arr,
-                        det_J_arr,
-                        weights_arr,
-                        D_elastic_arr,
-                        pwp_static_arr,
-                        mat_drainage_arr,
-                        mat_model_arr,
-                        mat_c_arr,
-                        mat_phi_arr,
-                        mat_su_arr,
-                        mat_sigma_ci_arr,
-                        mat_gsi_arr,
-                        mat_disturb_factor_arr,
-                        mat_mb_arr,
-                        mat_s_arr,
-                        mat_a_arr,
-                        penalties_arr,
-                        is_srm,
-                        is_gravity_phase,
-                        target_m_stage,
-                        num_dof
+                        target_m_stage
                     )
                     
                     # (Moved collections re-mapping outside iteration loop for performance)
@@ -1661,7 +1777,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     f_base = np.linalg.norm((F_int_initial + delta_F_external)[free_dofs])
                     if f_base < 1.0: f_base = 1.0
 
-                    if norm_R / f_base < settings.tolerance and iteration > 1:
+                    if norm_R / f_base < phase.tolerance and iteration > 1:
                         converged = True
                         break
                     
@@ -1721,7 +1837,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         
                         # Check for Explosion (Huge Displacement)
                         # Use a generous multiplier on the user limit (e.g. 100x) or a hard cap like 1e6 meters
-                        limit_val = (settings.max_displacement_limit or 10.0) * 100.0
+                        limit_val = (phase.max_displacement_limit or 10.0) * 100.0
                         max_du = np.max(np.abs(du_free))
                         if max_du > limit_val:
                              raise ValueError(f"Solver instability detected: Incremental displacement {max_du:.2E} exceeds limit {limit_val:.2E}. Model is likely unstable/unconstrained.")
@@ -1795,12 +1911,14 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 temp_phase_yield = {}
                 temp_phase_strain = {}
                 temp_phase_pwp_excess = {}
+                temp_phase_state_vars = {}
                 for i, ep in enumerate(active_elem_props):
                     eid = ep['id']
                     temp_phase_stress[eid] = [new_stresses_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
                     temp_phase_yield[eid] = [new_yield_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
                     temp_phase_strain[eid] = [new_strain_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
                     temp_phase_pwp_excess[eid] = [new_pwp_excess_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
+                    temp_phase_state_vars[eid] = [new_state_vars_arr[i, gp] for gp in range(NUM_GAUSS_POINTS)]
 
                 step_count += 1
                 current_u_incremental = trial_u
@@ -1813,6 +1931,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 for eid, strain in temp_phase_strain.items(): phase_strain_history[eid] = strain
                 for eid, yld in temp_phase_yield.items(): phase_yield_history[eid] = yld
                 for eid, pexc in temp_phase_pwp_excess.items(): phase_pwp_excess_history[eid] = pexc
+                for eid, sv in temp_phase_state_vars.items(): phase_state_vars_history[eid] = sv
                 
                 method_label = "(Arc-Length)" if use_arc_length else ""
                 msg = f"Phase {phase.name} | Step {step_count}: {m_type} {current_m_stage:.4f} | Max Incr. Disp: {max_disp:.6f} m | Iterations {iteration} {method_label}"
@@ -1824,8 +1943,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 phase_step_points.append(pt)
                 
                 # --- Termination Check: Displacement Limit (Collapse Detection) ---
-                if max_disp > settings.max_displacement_limit:
-                    msg_coll = f"Displacement limit ({settings.max_displacement_limit:.2f} m) exceeded. Terminating phase due to excessive deformation."
+                if max_disp > phase.max_displacement_limit:
+                    msg_coll = f"Displacement limit ({phase.max_displacement_limit:.2f} m) exceeded. Terminating phase due to excessive deformation."
                     log.append(msg_coll)
                     yield {"type": "log", "content": msg_coll}
                     print(msg_coll)
@@ -1901,15 +2020,15 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     sign_lambda = al_result.get('sign_lambda_next', sign_lambda)
                     prev_delta_u_free = al_result.get('delta_u_free_converged')
                     
-                    if iteration < settings.min_desired_iterations:
+                    if iteration < phase.min_desired_iterations:
                         arc_length_radius *= 1.5
-                    elif iteration > settings.max_desired_iterations:
+                    elif iteration > phase.max_desired_iterations:
                         arc_length_radius *= 0.5
-                else:
-                    if iteration < settings.min_desired_iterations:
-                        step_size *= 1.5
-                    elif iteration > settings.max_desired_iterations:
-                        step_size *= 0.5
+                    else:
+                        if iteration < phase.min_desired_iterations:
+                            step_size *= 1.5
+                        elif iteration > phase.max_desired_iterations:
+                            step_size *= 0.5
             else:
                 # FAILURE BRANCH
                 if use_arc_length:
@@ -1931,7 +2050,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                         failed_phases.add(phase.id)
                         break
             
-            if not converged and iteration >= settings.max_iterations:
+            if not converged and iteration >= phase.max_iterations:
                 # Diagnostics for final iteration failures
                 msg_fail = f"Phase {phase.name} | Step {step_count+1} FAILED to converge."
                 log.append(msg_fail); print(msg_fail); yield {"type": "log", "content": msg_fail}
@@ -2009,7 +2128,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 urx2=float(u_rel[3]), ury2=float(u_rel[4])
             ))
 
-        # --- DIAGNOSTIC: Check beam continuity at shared nodes ---
+        # DIAGNOSTIC: Check beam continuity at shared nodes
         if p_beam_results:
             # Group by beam_id
             from collections import defaultdict
@@ -2087,6 +2206,29 @@ def solve_phases(request: SolverRequest, should_stop=None):
                      sig_zz_val = nu * (sig_xx_total + sig_yy_total)
                 else:
                      sig_zz_val = nu * (sig_xx_total + sig_yy_total - 2*pwp_total) + pwp_total
+                     
+                # Calculate E used
+                mat = ep['material']
+                e_used = mat.effyoungsModulus or mat.youngsModulus or 10000.0
+                if mat.material_model == MaterialModel.HARDENING_SOIL:
+                    E50_ref = mat.youngsModulus50_ref or 1e4
+                    Eur_ref = mat.youngsModulusUr_ref or 3e4
+                    m = mat.m_power or 0.5
+                    p_ref = mat.p_ref or 100.0
+                    c = mat.cohesion or 0.0
+                    phi = mat.frictionAngle or 0.0
+                    c_cos_phi = c * np.cos(np.radians(phi))
+                    sin_phi = np.sin(np.radians(phi))
+                    s_avg = (sig[0] + sig[1]) * 0.5
+                    r_val = np.sqrt(((sig[0] - sig[1])*0.5)**2 + sig[2]**2)
+                    sig_3 = s_avg - r_val
+                    if sig_3 > -1.0:
+                        sig_3 = -1.0
+                    sig_3_c = -sig_3
+                    term = (c_cos_phi + sig_3_c * sin_phi) / (c_cos_phi + p_ref * sin_phi)
+                    if term < 0.001:
+                        term = 0.001
+                    e_used = Eur_ref * (term ** m)
     
                 p_stresses.append(StressResult(
                     element_id=eid, 
@@ -2097,12 +2239,14 @@ def solve_phases(request: SolverRequest, should_stop=None):
                     pwp_excess=float(pwp_excess),
                     pwp_total=float(pwp_total),
                     eps_xx=float(eps[0]), eps_yy=float(eps[1]), eps_xy=float(eps[2]), eps_zz=0.0,
-                    is_yielded=bool(yld), m_stage=float(current_m_stage)
+                    is_yielded=bool(yld), m_stage=float(current_m_stage),
+                    e_used=float(e_used)
                 ))
         
         # success = (not is_srm and current_m_stage >= 0.999) or (is_srm and current_m_stage > 1.0)
         success = (not is_srm and current_m_stage >= 0.999) or (is_srm)
         error_msg = None
+        is_calculated = True
         if not success:
             error_msg = f"Phase failed at step {step_count}."
 
@@ -2117,7 +2261,8 @@ def solve_phases(request: SolverRequest, should_stop=None):
             'step_points': phase_step_points,
             'step_failed_at': step_count if not success else None,
             'error': error_msg,
-            'track_data': phase_track_data
+            'track_data': phase_track_data,
+            'is_calculated': is_calculated
         }
         phase_results.append(phase_details)
         yield {"type": "phase_result", "content": phase_details}
@@ -2132,6 +2277,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
                 element_stress_state[eid] = phase_stress_history[eid]
                 element_strain_state[eid] = phase_strain_history[eid]
                 element_yield_state[eid] = phase_yield_history[eid]
+                element_state_vars[eid] = phase_state_vars_history[eid]
                 if eid in phase_pwp_excess_history: element_pwp_excess_state[eid] = phase_pwp_excess_history[eid]
 
             log.append(f"Phase {phase.name} completed successfully.")
@@ -2140,10 +2286,12 @@ def solve_phases(request: SolverRequest, should_stop=None):
             phase_snapshots[phase.id] = {
                 'total_displacement': total_displacement.copy(),
                 'beam_u_ref': copy.deepcopy(beam_u_ref_map),
+                'elem_u_ref_map': copy.deepcopy(elem_u_ref_map),
                 'element_stress_state': copy.deepcopy(element_stress_state),
                 'element_strain_state': copy.deepcopy(element_strain_state),
                 'element_yield_state': copy.deepcopy(element_yield_state),
                 'element_pwp_excess_state': copy.deepcopy(element_pwp_excess_state),
+                'element_state_vars': copy.deepcopy(element_state_vars),
                 'current_water_level_data': copy.deepcopy(current_water_level_data),
                 'current_water_level_id': current_water_level_id,
                 'elem_materials': {ep['id']: (ep['material'], ep['K'].copy(), ep['F_grav'].copy(), ep['D'].copy(), copy.deepcopy(ep['gauss_points'])) for ep in elem_props_all},
@@ -2154,7 +2302,7 @@ def solve_phases(request: SolverRequest, should_stop=None):
             msg_abort = f"Calculation ABORTED. Phase '{phase.name}' failed to converge."
             log.append(msg_abort); yield {"type": "log", "content": msg_abort}
             print(f"\nCRITICAL: {msg_abort}")
-            return # Terminate the generator
+            return
         
         # Log Phase Duration
         phase_duration = time.time() - phase_start_time

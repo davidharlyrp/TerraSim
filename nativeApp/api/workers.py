@@ -13,7 +13,7 @@ import traceback
 from PySide6.QtCore import QThread, Signal
 
 # Import local engine components
-from engine.models import MeshRequest, SolverRequest
+from engine.models import MeshRequest, SolverRequest, PhaseRequest
 from engine.mesh_generator import generate_mesh
 
 class MeshWorker(QThread):

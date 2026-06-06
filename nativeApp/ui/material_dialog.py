@@ -8,6 +8,7 @@
 from __future__ import annotations
 import time
 import math
+import re
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
     QLabel, QLineEdit, QDoubleSpinBox, QComboBox, QPushButton,
@@ -22,6 +23,7 @@ from PySide6.QtGui import QColor
 MATERIAL_MODELS = [
     ("linear_elastic",  "Linear Elastic"),
     ("mohr_coulomb",    "Mohr-Coulomb"),
+    ("hardening_soil",  "Hardening Soil"),
     ("hoek_brown",      "Hoek-Brown (Rock)"),
 ]
 
@@ -42,6 +44,11 @@ DEFAULT_MATERIAL = {
     "drainage_type": "non_porous",
     "youngsModulus": 30000.0,
     "effyoungsModulus": 30000.0,
+    "youngsModulus50_ref": 30000.0,
+    "youngsModulusOed_ref": 24000.0,
+    "youngsModulusUr_ref": 90000.0,
+    "m_power": 0.5,
+    "p_ref": 100.0,
     "poissonsRatio": 0.3,
     "unitWeightUnsaturated": 18.0,
     "unitWeightSaturated": 20.0,
@@ -139,6 +146,16 @@ class MaterialDialog(QDialog):
             self._tabs.setTabEnabled(1 if not self._is_beam_mode else 0, False)
             self._tabs.setCurrentIndex(1 if self._is_beam_mode else 0)
 
+    @staticmethod
+    def _latex_to_html(latex_str: str) -> str:
+        """Convert simple LaTeX math notation to HTML with <sub>/<sup> tags."""
+        html = latex_str
+        # Replace _{...} with <sub>...</sub>
+        html = re.sub(r'_\{([^}]*)\}', r'<sub>\1</sub>', html)
+        # Replace ^{...} with <sup>...</sup>
+        html = re.sub(r'\^\{([^}]*)\}', r'<sup>\1</sup>', html)
+        return html
+
     def _build_row(self, label_text: str, widget: QWidget, unit_text: str = "") -> QWidget:
         row = QWidget()
         layout = QHBoxLayout(row)
@@ -146,6 +163,31 @@ class MaterialDialog(QDialog):
         layout.setSpacing(6)
 
         lbl = QLabel(label_text)
+        lbl.setMinimumWidth(140)
+        lbl.setMaximumWidth(140)
+        lbl.setStyleSheet("font-size: 11px; color: #475569;")
+        layout.addWidget(lbl)
+
+        layout.addWidget(widget)
+
+        unit_lbl = QLabel(unit_text if unit_text else "")
+        unit_lbl.setMinimumWidth(60)
+        unit_lbl.setStyleSheet("font-size: 10px; color: #94a3b8;")
+        layout.addWidget(unit_lbl)
+
+        layout.addStretch()
+        return row
+
+    def _build_row_latex(self, latex_str: str, widget: QWidget, unit_text: str = "") -> QWidget:
+        """Like _build_row but renders the label with HTML sub/superscripts."""
+        html_label = self._latex_to_html(latex_str)
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        lbl = QLabel(html_label)
+        lbl.setTextFormat(Qt.RichText)
         lbl.setMinimumWidth(140)
         lbl.setMaximumWidth(140)
         lbl.setStyleSheet("font-size: 11px; color: #475569;")
@@ -243,7 +285,7 @@ class MaterialDialog(QDialog):
         self._soil_layout.setSpacing(12)
         self._build_soil_fields()
         self._soil_scroll.setWidget(soil_content)
-        self._tabs.addTab(self._soil_scroll, "Soil & Rock")
+        self._tabs.addTab(self._soil_scroll, "Material")
 
         # Tab 2: Embedded Beam
         self._beam_scroll = QScrollArea()
@@ -300,9 +342,29 @@ class MaterialDialog(QDialog):
         model_layout.addWidget(self._build_row("Drainage Behavior", self._cmb_drainage))
         self._soil_layout.addWidget(grp_model)
 
-        # Physico-mechanical Group
-        grp_stiff = QGroupBox("Stiffness & Weight")
-        stiff_layout = QVBoxLayout(grp_stiff)
+        # General Group
+        grp_gen = QGroupBox("General Properties")
+        gen_layout = QVBoxLayout(grp_gen)
+        gen_layout.setContentsMargins(12, 12, 12, 12)
+        gen_layout.setSpacing(8)
+
+        self._spn_gamma = _create_spinbox(18.0)
+        self._row_gamma = self._build_row_latex("Unit Weight, γ", self._spn_gamma, "kN/m³")
+        gen_layout.addWidget(self._row_gamma)
+
+        self._spn_gamma_sat = _create_spinbox(20.0)
+        self._row_gamma_sat = self._build_row_latex("Unit Weight Sat., γ_{sat}", self._spn_gamma_sat, "kN/m³")
+        gen_layout.addWidget(self._row_gamma_sat)
+
+        self._spn_voidRatio = _create_spinbox(0.5)
+        self._row_voidRatio = self._build_row_latex("Void Ratio, e", self._spn_voidRatio, "-")
+        gen_layout.addWidget(self._row_voidRatio)
+
+        self._soil_layout.addWidget(grp_gen)
+
+        # Stiffness Group
+        self._grp_stiff = QGroupBox("Stiffness Properties")
+        stiff_layout = QVBoxLayout(self._grp_stiff)
         stiff_layout.setContentsMargins(12, 12, 12, 12)
         stiff_layout.setSpacing(8)
         
@@ -323,17 +385,60 @@ class MaterialDialog(QDialog):
         self._spn_nu = _create_spinbox(0.3, 0, 0.499, 3)
         stiff_layout.addWidget(self._build_row("Poisson's Ratio, ν", self._spn_nu))
 
-        self._spn_gamma = _create_spinbox(18.0)
-        self._row_gamma = self._build_row("Unit Weight, γ", self._spn_gamma, "kN/m³")
-        stiff_layout.addWidget(self._row_gamma)
+        self._soil_layout.addWidget(self._grp_stiff)
 
-        self._spn_gamma_sat = _create_spinbox(20.0)
-        self._row_gamma_sat = self._build_row("Unit Weight Sat., γsat", self._spn_gamma_sat, "kN/m³")
-        stiff_layout.addWidget(self._row_gamma_sat)
-        self._soil_layout.addWidget(grp_stiff)
+        # Hardening Soil Stiffness Group
+        self._grp_hs = QGroupBox("Stiffness Properties")
+        hs_layout = QVBoxLayout(self._grp_hs)
+        hs_layout.setContentsMargins(12, 12, 12, 12)
+        hs_layout.setSpacing(8)
+        
+        self._row_E50ref = QWidget()
+        self._row_E50ref_layout = QVBoxLayout(self._row_E50ref)
+        self._row_E50ref_layout.setContentsMargins(0, 0, 0, 0)
+        self._spn_E50ref = _create_spinbox(30000)
+        self._row_E50ref_layout.addWidget(self._build_row_latex("E_{50}^{ref}", self._spn_E50ref, "kN/m²"))
+        hs_layout.addWidget(self._row_E50ref)
+
+        self._row_Eoedref = QWidget()
+        self._row_Eoedref_layout = QVBoxLayout(self._row_Eoedref)
+        self._row_Eoedref_layout.setContentsMargins(0, 0, 0, 0)
+        self._spn_Eoedref = _create_spinbox(30000)
+        self._row_Eoedref_layout.addWidget(self._build_row_latex("E_{oed}^{ref}", self._spn_Eoedref, "kN/m²"))
+        hs_layout.addWidget(self._row_Eoedref)
+
+        self._row_Eurref = QWidget()
+        self._row_Eurref_layout = QVBoxLayout(self._row_Eurref)
+        self._row_Eurref_layout.setContentsMargins(0, 0, 0, 0)
+        self._spn_Eurref = _create_spinbox(30000)
+        self._row_Eurref_layout.addWidget(self._build_row_latex("E_{ur}^{ref}", self._spn_Eurref, "kN/m²"))
+        hs_layout.addWidget(self._row_Eurref)
+        
+        self._row_m_power = QWidget()
+        self._row_m_power_layout = QVBoxLayout(self._row_m_power)
+        self._row_m_power_layout.setContentsMargins(0, 0, 0, 0)
+        self._spn_m_power = _create_spinbox(0.5, 0, 1, 2)
+        self._row_m_power_layout.addWidget(self._build_row("Power, m", self._spn_m_power))
+        hs_layout.addWidget(self._row_m_power)
+
+        self._spn_nu = _create_spinbox(0.3, 0, 0.499, 3)
+        self._row_nu = QWidget()
+        self._row_nu_layout = QVBoxLayout(self._row_nu)
+        self._row_nu_layout.setContentsMargins(0, 0, 0, 0)
+        self._row_nu_layout.addWidget(self._build_row("Poisson's Ratio, ν'", self._spn_nu))
+        hs_layout.addWidget(self._row_nu)
+
+        self._row_pref = QWidget()
+        self._row_pref_layout = QVBoxLayout(self._row_pref)
+        self._row_pref_layout.setContentsMargins(0, 0, 0, 0)
+        self._spn_pref = _create_spinbox(100, maximum=1e6)
+        self._row_pref_layout.addWidget(self._build_row_latex("p_{ref}", self._spn_pref, "kN/m²"))
+        hs_layout.addWidget(self._row_pref)
+
+        self._soil_layout.addWidget(self._grp_hs)
 
         # Strength Groups
-        self._grp_mc_drained = QGroupBox("MC Drained Strength")
+        self._grp_mc_drained = QGroupBox("Strength Properties")
         mc_dl = QVBoxLayout(self._grp_mc_drained)
         mc_dl.setContentsMargins(12, 12, 12, 12)
         mc_dl.setSpacing(8)
@@ -347,7 +452,7 @@ class MaterialDialog(QDialog):
         mc_dl.addWidget(self._build_row("Lateral Coeff., K₀", self._spn_k0))
         self._soil_layout.addWidget(self._grp_mc_drained)
 
-        self._grp_mc_undrained = QGroupBox("MC Undrained Strength")
+        self._grp_mc_undrained = QGroupBox("Strength Properties")
         mc_ul = QVBoxLayout(self._grp_mc_undrained)
         mc_ul.setContentsMargins(12, 12, 12, 12)
         mc_ul.setSpacing(8)
@@ -357,23 +462,23 @@ class MaterialDialog(QDialog):
         mc_ul.addWidget(self._build_row("Lateral Coeff., K₀x", self._spn_k0_u))
         self._soil_layout.addWidget(self._grp_mc_undrained)
 
-        self._grp_hb = QGroupBox("Hoek-Brown Rock")
+        self._grp_hb = QGroupBox("Strength Properties")
         hb_layout = QVBoxLayout(self._grp_hb)
         hb_layout.setContentsMargins(12, 12, 12, 12)
         hb_layout.setSpacing(8)
         self._spn_sigma_ci = _create_spinbox(0)
-        hb_layout.addWidget(self._build_row("UCS Rock, σci", self._spn_sigma_ci, "kN/m²"))
+        hb_layout.addWidget(self._build_row_latex("UCS Rock, σ_{ci}", self._spn_sigma_ci, "kN/m²"))
         self._spn_gsi = _create_spinbox(50, 0, 100, 0)
         self._spn_gsi.valueChanged.connect(self._recalc_hoek_brown)
         hb_layout.addWidget(self._build_row("GSI Index", self._spn_gsi))
         self._spn_mi = _create_spinbox(10, 1, 50, 0)
         self._spn_mi.valueChanged.connect(self._recalc_hoek_brown)
-        hb_layout.addWidget(self._build_row("Intact Param., mi", self._spn_mi))
+        hb_layout.addWidget(self._build_row_latex("Intact Param., m_{i}", self._spn_mi))
         self._spn_D = _create_spinbox(0, 0, 1, 2)
         self._spn_D.valueChanged.connect(self._recalc_hoek_brown)
         hb_layout.addWidget(self._build_row("Disturbance, D", self._spn_D))
         
-        self._hb_results = QLabel("Derived: m_b=... s=... a=...")
+        self._hb_results = QLabel("Derived: m_{b}=... s=... a=...")
         self._hb_results.setStyleSheet("color: #64748b; font-size: 11px;")
         hb_layout.addWidget(self._hb_results)
         self._soil_layout.addWidget(self._grp_hb)
@@ -427,7 +532,7 @@ class MaterialDialog(QDialog):
 
         self._beam_layout.addWidget(grp_beam)
 
-        grp_inter = QGroupBox("Skin Friction & Interaction")
+        grp_inter = QGroupBox("Skin Friction - Interaction")
         inter_layout = QVBoxLayout(grp_inter)
         inter_layout.setContentsMargins(12, 12, 12, 12)
         inter_layout.setSpacing(8)
@@ -481,9 +586,15 @@ class MaterialDialog(QDialog):
 
             self._spn_E.setValue(d.get("youngsModulus", 30000))
             self._spn_Eeff.setValue(d.get("effyoungsModulus", 30000))
+            self._spn_E50ref.setValue(d.get("youngsModulus50_ref", 30000))
+            self._spn_Eoedref.setValue(d.get("youngsModulusOed_ref", 24000))
+            self._spn_Eurref.setValue(d.get("youngsModulusUr_ref", 90000))
+            self._spn_m_power.setValue(d.get("m_power", 0.5))
+            self._spn_pref.setValue(d.get("p_ref", 100))
             self._spn_nu.setValue(d.get("poissonsRatio", 0.3))
             self._spn_gamma.setValue(d.get("unitWeightUnsaturated", 18.0))
             self._spn_gamma_sat.setValue(d.get("unitWeightSaturated", 20.0))
+            self._spn_voidRatio.setValue(d.get("voidRatio", 0.5))
             self._spn_c.setValue(d.get("cohesion", 0))
             self._spn_phi.setValue(d.get("frictionAngle", 30))
             self._spn_psi.setValue(d.get("dilationAngle", 0))
@@ -525,7 +636,23 @@ class MaterialDialog(QDialog):
             d["poissonsRatio"] = self._spn_nu.value()
             d["unitWeightUnsaturated"] = self._spn_gamma.value()
             d["unitWeightSaturated"] = self._spn_gamma_sat.value()
+            d["voidRatio"] = self._spn_voidRatio.value()
             if d["material_model"] == "mohr_coulomb":
+                if d["drainage_type"] in ("drained", "undrained_a"):
+                    d["cohesion"] = self._spn_c.value()
+                    d["frictionAngle"] = self._spn_phi.value()
+                    d["dilationAngle"] = self._spn_psi.value()
+                    d["k0_x"] = self._spn_k0.value()
+                else:
+                    d["undrainedShearStrength"] = self._spn_su.value()
+                    d["k0_x"] = self._spn_k0_u.value()
+            if d["material_model"] == "hardening_soil":
+                d["youngsModulus50_ref"] = self._spn_E50ref.value()
+                d["youngsModulusEoed_ref"] = self._spn_Eoedref.value()
+                d["youngsModulusUr_ref"] = self._spn_Eurref.value()
+                d["m_power"] = self._spn_m_power.value()
+                d["p_ref"] = self._spn_pref.value()
+                d["poissonsRatio"] = self._spn_nu.value()
                 if d["drainage_type"] in ("drained", "undrained_a"):
                     d["cohesion"] = self._spn_c.value()
                     d["frictionAngle"] = self._spn_phi.value()
@@ -580,13 +707,21 @@ class MaterialDialog(QDialog):
         is_le = model == "linear_elastic"
         is_mc = model == "mohr_coulomb"
         is_hb = model == "hoek_brown"
+        is_hs = model == "hardening_soil"
         
         self._row_E.setVisible(is_le or drainage == "undrained_c")
         self._row_Eeff.setVisible(not (is_le or drainage == "undrained_c"))
         self._row_gamma_sat.setVisible(drainage != "non_porous")
-        
-        self._grp_mc_drained.setVisible(is_mc and drainage in ("drained", "undrained_a"))
-        self._grp_mc_undrained.setVisible(is_mc and drainage in ("undrained_b", "undrained_c"))
+
+        if is_hs:
+            self._grp_stiff.setVisible(False)
+            self._grp_hs.setVisible(True)
+        else:
+            self._grp_stiff.setVisible(True)
+            self._grp_hs.setVisible(False)
+
+        self._grp_mc_drained.setVisible((is_mc or is_hs) and drainage in ("drained", "undrained_a"))
+        self._grp_mc_undrained.setVisible((is_mc or is_hs) and drainage in ("undrained_b", "undrained_c"))
         self._grp_hb.setVisible(is_hb)
 
     def _on_model_changed(self, _idx):
@@ -606,6 +741,9 @@ class MaterialDialog(QDialog):
             self._cmb_drainage.addItem("Undrained A", "undrained_a")
             self._cmb_drainage.addItem("Undrained B", "undrained_b")
             self._cmb_drainage.addItem("Undrained C", "undrained_c")
+        if model == "hardening_soil":
+            self._cmb_drainage.addItem("Undrained A", "undrained_a")
+            self._cmb_drainage.addItem("Undrained B", "undrained_b")
         if model in ["linear_elastic", "hoek_brown"]: self._cmb_drainage.addItem("Non Porous", "non_porous")
         idx = self._cmb_drainage.findData(curr)
         self._cmb_drainage.setCurrentIndex(idx if idx >= 0 else 0)
